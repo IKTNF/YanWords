@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>研词助手 · 考研英语一词汇工作台</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">📖</span>
+    <div>
+      <div class="brand-name">研词助手</div>
+      <div class="brand-sub">考研英语一 · 词汇识别与记忆工作台</div>
+    </div>
+  </div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="workspace">工作区</button>
+    <button class="tab" data-tab="memory">记忆区<span class="badge" id="memCount">0</span></button>
+    <button class="tab" data-tab="dict">词典</button>
+  </nav>
+  <div class="top-right">
+    <span class="src-label">词库来源</span>
+    <select id="srcSelect" title="选择词典数据来源">
+      <option value="offline">内置考研词库（离线）</option>
+      <option value="youdao">有道词典（在线）</option>
+    </select>
+  </div>
+</header>
+
+<main>
+  <!-- ==================== 工作区 ==================== -->
+  <section class="panel active" id="panel-workspace">
+    <aside class="ws-side">
+      <div class="side-card">
+        <button class="btn btn-primary btn-block" id="btnUpload">📂 上传资料</button>
+        <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt,.md" multiple hidden>
+        <div class="upload-hint">支持 PDF / Word / TXT（≤1GB），可多选；也可把文件直接拖进右侧阅读区。超过 300 页的 PDF 解析前可自选页码范围</div>
+      </div>
+      <div class="side-card">
+        <div class="side-title">已上传文档</div>
+        <div id="docList" class="doc-list"></div>
+      </div>
+      <div class="side-card">
+        <div class="side-title">显示</div>
+        <div class="slider-row">
+          <span>缩放</span>
+          <input type="range" id="wsZoom" min="12" max="40" value="17">
+          <span id="wsZoomVal" class="mono">17px</span>
+        </div>
+        <label class="mode-row"><input type="checkbox" id="selectMode"> 文本选择模式（临时复制原文用）</label>
+        <button class="btn btn-ghost btn-block" id="btnClearMarks">清除全部标黄</button>
+      </div>
+      <div class="side-card">
+        <div class="side-title">操作提示</div>
+        <ul class="tips">
+          <li><b>单击</b>英文单词：弹出考研释义并<b>标黄</b></li>
+          <li><b>按住左键约 0.4 秒后拖拽</b>：框选多个单词识别<b>词组</b></li>
+          <li>右侧面板中点<b>收录</b>：把单词/词组存入记忆区</li>
+          <li>标黄可用面板中的按钮取消</li>
+          <li><b>扫描版 PDF</b>：自动以图片打开，长按拖拽框选区域即识别文字</li>
+        </ul>
+      </div>
+    </aside>
+    <div class="ws-main">
+      <div id="wsDoc" class="ws-doc">
+        <div class="empty" id="wsEmpty">
+          📄 上传资料后，这里将显示可点击识别的英文<br>
+          <span class="empty-sub">单击查释义并标黄 · 长按拖选词组 · 扫描版长按拖选区域识别 · 右侧面板一键收录</span>
+        </div>
+      </div>
+    </div>
+    <aside class="ws-def" id="wsDef">
+      <div class="ws-def-empty">
+        <div class="empty small">💡 单击单词查看考研释义<br><span class="empty-sub">长按拖选可识别词组</span></div>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ==================== 记忆区 ==================== -->
+  <section class="panel" id="panel-memory">
+    <div class="mem-toolbar card">
+      <div class="mem-title">📚 记忆区 <span class="muted" id="memCount2">共 0 条</span></div>
+      <div class="toolbar-right">
+        <input type="text" id="memSearch" placeholder="搜索已收录的单词 / 释义…">
+        <div class="slider-row">
+          <span>缩放</span>
+          <input type="range" id="memZoom" min="12" max="32" value="16">
+          <span id="memZoomVal" class="mono">16px</span>
+        </div>
+        <button class="btn" id="btnExportWord" title="按当前顺序导出全部记录">⬇ 导出 Word</button>
+        <button class="btn" id="btnExportPdf" title="按当前顺序导出全部记录">⬇ 导出 PDF</button>
+        <button class="btn btn-danger-ghost" id="btnClearMem">清空</button>
+      </div>
+    </div>
+    <div class="mem-list-wrap">
+      <div id="memList" class="mem-list"></div>
+    </div>
+  </section>
+
+  <!-- ==================== 词典 ==================== -->
+  <section class="panel" id="panel-dict">
+    <div class="dict-wrap">
+      <div class="dict-search card">
+        <input type="text" id="dictInput" placeholder="输入英文单词（如 economy）或中文（如 经济）…">
+        <button class="btn btn-primary" id="btnSearch">🔍 查询</button>
+      </div>
+      <div class="dict-hint muted">支持 英→中 / 中→英 · 内置词库含考研大纲 5530 词（含词频）+ 红宝书补充词 · 在线词典为有道</div>
+      <div id="dictResults" class="dict-results"></div>
+    </div>
+  </section>
+</main>
+
+<div id="toasts" class="toasts"></div>
+
+<script src="libs/pdf.min.js"></script>
+<script src="libs/mammoth.browser.min.js"></script>
+<script src="libs/fontkit.umd.min.js"></script>
+<script src="libs/pdf-lib.min.js"></script>
+<script src="libs/tess/tesseract.min.js"></script>
+<script src="libs/docx.umd.js"></script>
+<script src="js/wordlist.js"></script>
+<script src="js/app.js"></script>
+<script src="js/workspace.js"></script>
+<script src="js/memory.js"></script>
+<script src="js/dictionary.js"></script>
+<script src="js/export.js"></script>
+</body>
+</html>
