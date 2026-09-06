@@ -9,6 +9,7 @@ const MEM = {
   init(){
     this.load();
     this.listEl = document.getElementById('memList');
+    this.listWrap = document.querySelector('#panel-memory .mem-list-wrap');
     this.panelEl = document.getElementById('panel-memory');
     document.getElementById('btnExportWord').addEventListener('click', ()=>exportWordDoc());
     document.getElementById('btnExportPdf').addEventListener('click', ()=>exportPdfDoc());
@@ -81,8 +82,8 @@ const MEM = {
     this.save();
   },
 
-  /* 记忆区整体缩放（字号带动整个界面所有尺寸） */
-  applyZoom(){ this.panelEl.style.fontSize = (App.state.memZoom||16)+'px'; },
+  /* 记忆区缩放：只作用于单词/释义列表区域，工具栏（含滑条）保持固定 */
+  applyZoom(){ if(this.listWrap) this.listWrap.style.fontSize = (App.state.memZoom||16)+'px'; },
 
   render(){
     const q = (document.getElementById('memSearch').value||'').trim().toLowerCase();
@@ -176,23 +177,23 @@ const MEM = {
     if(!el) return;
     const w = String(word||'').trim().toLowerCase();
     if(!w){ el.innerHTML = ''; this._orgSelPos = null; return; }
-    const related = this.items.filter(it=>wordsSameFamily(String(it.w), w));
-    const exact = this.items.findIndex(it=>String(it.w).toLowerCase()===w);
-    if(exact>=0 && !related.includes(this.items[exact])) related.push(this.items[exact]);
+    let related = this.items.filter(it=>wordsSameFamily(String(it.w), w));
+    const exactIdx = this.items.findIndex(it=>String(it.w).toLowerCase()===w);
+    if(exactIdx>=0 && !related.includes(this.items[exactIdx])) related.push(this.items[exactIdx]);
     if(!related.length){
       el.innerHTML = '<div class="note-line">记忆区中未找到「'+App.esc(word)+'」的词群成员（试试输入记忆区中已有的单词）。</div>';
       this._orgSelPos = null;
       return;
     }
+    // 按记忆区序号排序展示
+    related.sort((a,b)=>(this.items.indexOf(a) - this.items.indexOf(b)));
     el.innerHTML = related.map(it=>{
       const pos = this.items.indexOf(it)+1;
-      return '<span class="org-chip'+(this._orgSelPos===pos?' sel':'')+'" data-pos="'+pos+'">'+App.esc(it.w)+'（'+pos+'）</span>';
+      return '<span class="org-chip" data-pos="'+pos+'">'+App.esc(it.w)+'（'+pos+'）</span>';
     }).join('');
-    if(!this._orgSelPos || !related.some(it=>this.items.indexOf(it)+1===this._orgSelPos)){
-      this._orgSelPos = this.items.indexOf(related[0])+1;
-      const first = el.querySelector('.org-chip');
-      if(first) first.classList.add('sel');
-    }
+    // 默认选中：输入的单词本身（若在记忆区中），否则第一个成员
+    this._orgSelPos = exactIdx>=0 ? exactIdx+1 : this.items.indexOf(related[0])+1;
+    el.querySelectorAll('.org-chip').forEach(c=>c.classList.toggle('sel', +c.dataset.pos===this._orgSelPos));
   },
 
   runSingle(word){
@@ -203,23 +204,32 @@ const MEM = {
     if(exact && !group.includes(exact)) group.push(exact);
     if(!group.length){ App.toast('记忆区中未找到「'+word+'」的词群','err'); return; }
     group.sort((a,b)=>String(a.w).length-String(b.w).length || String(a.w).localeCompare(String(b.w)));
-    const rest = this.items.filter(it=>!group.includes(it));
     const mode = (document.querySelector('input[name="orgPos"]:checked')||{}).value;
-    let pos;
+    // 确定锚点：词群插入到锚点之后，锚点本身保持原位
+    let anchor = null, anchorName = '';
     if(mode==='index'){
-      pos = Math.max(0, Math.min(parseInt(document.getElementById('orgIndex').value||'1',10)||1, this.items.length)-1);
+      const n = parseInt(document.getElementById('orgIndex').value||'1',10)||1;
+      if(n >= 1 && n <= this.items.length) anchor = this.items[n-1];
+      anchorName = anchor ? anchor.w : '';
     }else{
-      const target = this.items.find(it=>this.items.indexOf(it)+1===this._orgSelPos);
-      if(!target){ App.toast('请先在上方选择一个词群成员作为整理位置','err'); return; }
-      pos = Math.max(0, rest.findIndex(it=>it===target));
-      if(pos<0) pos = 0;
+      anchor = this.items.find(it=>this.items.indexOf(it)+1===this._orgSelPos) || null;
+      if(!anchor){ App.toast('请先在上方选择一个词群成员作为整理位置','err'); return; }
+      anchorName = anchor.w;
     }
-    rest.splice(pos, 0, ...group);
+    // 锚点若属于词群则不动，其余成员插到其后；否则整组插到锚点之后
+    const others = (anchor && group.includes(anchor)) ? group.filter(it=>it!==anchor) : group;
+    const rest = this.items.filter(it=>!others.includes(it));
+    if(anchor && rest.includes(anchor)){
+      const ti = rest.indexOf(anchor);
+      rest.splice(ti+1, 0, ...others);
+    }else{
+      rest.unshift(...others);
+    }
     this.items = rest;
     this.save();
     this.render();
     this.closeOrg();
-    App.toast('已将「'+w+'」词群 '+group.length+' 个词整理到序号 '+(pos+1)+' 处');
+    App.toast('已将「'+w+'」词群 '+others.length+' 个词整理到'+(anchor ? '「'+anchorName+'」之后' : '最前面'));
   },
 
   previewBatch(){

@@ -750,7 +750,18 @@ const WS = {
 
   showWordPopup(word, entry, e, doc, idx, spanEl, overlay){
     const marked = overlay ? spanEl.classList.contains('marked') : (doc ? doc.marks.has(idx) : false);
-    const fam = App.dictFamily(entry ? entry.w : word, 10);
+    let fam;
+    if(entry){
+      const clean = String(word||'').toLowerCase().replace(/[^a-z]/g,'');
+      if(clean && clean !== entry.w.toLowerCase()){
+        // 点击的是派生形式（moves→move）：原形排到词群第一位，可直接收录
+        fam = [entry, ...App.dictFamily(entry.w, 9)];
+      }else{
+        fam = App.dictFamily(entry.w, 10);
+      }
+    }else{
+      fam = App.dictFamily(String(word||''), 10);
+    }
     const ctx = { text:word, entry, isPhrase:false, doc, idx, spanEl, overlay,
                   onlineSenses:null, onlinePhon:'' };
     this.renderDef(this.popupWordHTML(word, entry, marked, fam, !!doc), ctx);
@@ -827,7 +838,9 @@ const WS = {
     if(fam && fam.length){
       body += '<div class="popup-section-title">词群释义（'+fam.length+'，点击查看 / 📥 收录）</div><div class="fam-list">'
         + fam.map(f=>{
+            const isBase = entry && f.w.toLowerCase()===entry.w.toLowerCase();
             return '<div class="fam-row" data-fam="'+App.esc(f.w)+'" title="点击查看该词释义">'
+              + (isBase ? '<span class="chip gray">原形</span>' : '')
               + '<span class="fam-word">'+App.esc(f.w)+'</span>'
               + (f.p?'<span class="popup-phon">'+App.esc(f.p)+'</span>':'')
               + '<span class="fam-def">'+App.esc(f.defs[0]||'')+'</span>'
