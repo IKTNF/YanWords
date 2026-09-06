@@ -1,8 +1,9 @@
 'use strict';
 /* ============ 全局应用状态与公共能力 ============ */
 const App = {
-  state: { source:'offline', wsZoom:17, memZoom:16 },
+  state: { source:'offline', wsZoom:17, memZoom:16, wsLeftW:252, wsRightW:342, wsLeftHidden:false, wsRightHidden:false },
   index: new Map(),
+  famIndex: new Map(),
 
   boot(){
     // 恢复设置
@@ -12,6 +13,7 @@ const App = {
     }catch(e){}
     // 词库索引
     for(const r of (window.KAOYAN_DICT||[])) this.index.set(r[0].toLowerCase(), r);
+    this.buildFamIndex();
     // 顶栏标签
     document.querySelectorAll('.tab').forEach(t=>{
       t.addEventListener('click', ()=>this.switchTab(t.dataset.tab));
@@ -111,6 +113,45 @@ const App = {
     return out;
   },
 
+  /* ---------- 词族（词群）索引 ---------- */
+  buildFamIndex(){
+    this.famIndex = new Map();
+    for(const r of (window.KAOYAN_DICT||[])){
+      const w = r[0].toLowerCase();
+      for(const s of wordStemSet(w)){
+        if(!this.famIndex.has(s)) this.famIndex.set(s, []);
+        this.famIndex.get(s).push(w);
+      }
+    }
+  },
+
+  dictFamily(word, max){
+    max = max || 10;
+    const w = String(word||'').toLowerCase().replace(/[^a-z]/g,'');
+    if(!w) return [];
+    const cand = new Map();
+    for(const s of wordStemSet(w)){
+      for(const k of (this.famIndex.get(s)||[])){
+        if(k!==w && !cand.has(k)) cand.set(k, this.makeEntry(k));
+        if(cand.size>=max*3) break;
+      }
+      if(cand.size>=max*3) break;
+    }
+    // 前缀/包含关系补充
+    for(const r of (window.KAOYAN_DICT||[])){
+      const k = r[0].toLowerCase();
+      if(k===w || cand.has(k)) continue;
+      const m = Math.min(k.length, w.length);
+      if(m>=5 && (k.startsWith(w) || w.startsWith(k) || k.includes(w) || w.includes(k))){
+        cand.set(k, this.makeEntry(k));
+        if(cand.size>=max*3) break;
+      }
+    }
+    const list = [...cand.values()];
+    list.sort((a,b)=>(a.freq==null?1e9:a.freq)-(b.freq==null?1e9:b.freq));
+    return list.slice(0, max);
+  },
+
   /* ---------- 在线词典 ---------- */
   parseYoudao(d){
     const out = { phonetic:'', senses:[] };
@@ -142,13 +183,14 @@ const App = {
 
   async fetchOnline(q){
     try{
-      const r = await fetch('/api/dict?q='+encodeURIComponent(q)+'&source=youdao');
+      const r = await fetch('/api/dict?q='+encodeURIComponent(q)+'&source=youdao', {signal: AbortSignal.timeout(12000)});
       const d = await r.json();
       if(!r.ok || d.error) return { senses:[], phonetic:'', error:(d&&d.error)||('HTTP '+r.status) };
       const p = this.parseYoudao(d);
       return { senses:p.senses, phonetic:p.phonetic, error:'' };
     }catch(e){
-      return { senses:[], phonetic:'', error:String(e&&e.message||e) };
+      const timedOut = e && (e.name==='TimeoutError' || e.name==='AbortError');
+      return { senses:[], phonetic:'', error: timedOut ? '在线查询超时，请稍后重试或改用内置离线词库' : String(e&&e.message||e) };
     }
   }
 };
@@ -166,6 +208,51 @@ function morphCandidates(w){
     }
   }
   return out;
+}
+
+/* ---------- 词族（词群）公共算法：generate / generator / regeneration 等 ---------- */
+function wordStemSet(w){
+  let t = String(w||'').toLowerCase().replace(/[^a-z]/g,'');
+  const s = new Set();
+  if(t.length>=4) s.add(t);
+  const suf = ['ization','isation','ingly','edly','ities','ation','ition','ness','ment','tion','sion','able','ible','ance','ence','ship','hood','ive','ous','ful','less','ize','ise','ify','ate','ity','ist','ism','ian','ing','ied','ies','est','ant','ent','ary','ory','ure','cy','ly','er','or','ion','ed','es','ic','al','ty','y','e','s'];
+  for(let k=0;k<3;k++){
+    let next = null;
+    for(const x of suf){
+      if(t.endsWith(x) && t.length-x.length>=4){
+        const b = t.slice(0, -x.length);
+        if(b.length>=4){ s.add(b); if(!next) next = b; }
+      }
+    }
+    if(!next || next===t) break;
+    t = next;
+  }
+  return s;
+}
+
+function lcsLen(a, b){
+  const la = a.length, lb = b.length;
+  let best = 0;
+  for(let i=0;i<la;i++){
+    if(la-i <= best) break;
+    for(let j=0;j<lb;j++){
+      if(lb-j <= best) break;
+      let k = 0;
+      while(i+k<la && j+k<lb && a[i+k]===b[j+k]) k++;
+      if(k > best) best = k;
+    }
+  }
+  return best;
+}
+
+function wordsSameFamily(a, b){
+  a = String(a||'').toLowerCase().replace(/[^a-z]/g,'');
+  b = String(b||'').toLowerCase().replace(/[^a-z]/g,'');
+  if(!a || !b || a===b) return false;
+  const A = wordStemSet(a), B = wordStemSet(b);
+  for(const x of A){ if(B.has(x)) return true; }
+  // 最长公共子串 >= 5 视为同族（覆盖 generate/generation、generate/regeneration 等）
+  return lcsLen(a, b) >= 5;
 }
 
 document.addEventListener('DOMContentLoaded', ()=>App.boot());

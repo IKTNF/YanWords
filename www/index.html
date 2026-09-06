@@ -33,7 +33,7 @@
 <main>
   <!-- ==================== 工作区 ==================== -->
   <section class="panel active" id="panel-workspace">
-    <aside class="ws-side">
+    <aside class="ws-side" id="wsSide">
       <div class="side-card">
         <button class="btn btn-primary btn-block" id="btnUpload">📂 上传资料</button>
         <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt,.md" multiple hidden>
@@ -64,6 +64,9 @@
         </ul>
       </div>
     </aside>
+    <div class="col-handle" id="wsLeftHandle" title="拖动调整宽度，点击箭头收起/展开">
+      <button class="col-toggle" id="wsLeftToggle" title="收起/展开左侧栏">‹</button>
+    </div>
     <div class="ws-main">
       <div id="wsDoc" class="ws-doc">
         <div class="empty" id="wsEmpty">
@@ -71,6 +74,9 @@
           <span class="empty-sub">单击查释义并标黄 · 长按拖选词组 · 扫描版长按拖选区域识别 · 右侧面板一键收录</span>
         </div>
       </div>
+    </div>
+    <div class="col-handle" id="wsRightHandle" title="拖动调整宽度，点击箭头收起/展开">
+      <button class="col-toggle" id="wsRightToggle" title="收起/展开右侧栏">›</button>
     </div>
     <aside class="ws-def" id="wsDef">
       <div class="ws-def-empty">
@@ -92,6 +98,7 @@
         </div>
         <button class="btn" id="btnExportWord" title="按当前顺序导出全部记录">⬇ 导出 Word</button>
         <button class="btn" id="btnExportPdf" title="按当前顺序导出全部记录">⬇ 导出 PDF</button>
+        <button class="btn" id="btnOrg" title="把同一词族的单词整理到一起">🔀 整理</button>
         <button class="btn btn-danger-ghost" id="btnClearMem">清空</button>
       </div>
     </div>

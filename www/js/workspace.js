@@ -34,6 +34,34 @@ const WS = {
       document.getElementById('wsZoomVal').textContent = e.target.value+'px';
       this.applyZoom(); App.save();
     });
+    // 左右侧栏：拖动调宽 / 点击箭头隐藏，内容随宽度缩放
+    this.leftEl = document.getElementById('wsSide');
+    this.rightEl = document.getElementById('wsDef');
+    document.getElementById('wsLeftHandle').addEventListener('mousedown', e=>{
+      if(e.target.closest('.col-toggle')) return;
+      e.preventDefault();
+      if(App.state.wsLeftHidden){ App.state.wsLeftHidden = false; this.colDrag = {side:'left', startX:e.clientX, startW:160}; }
+      else this.colDrag = {side:'left', startX:e.clientX, startW:App.state.wsLeftW||252};
+      document.getElementById('wsLeftHandle').classList.add('active');
+      this.applyCols();
+    });
+    document.getElementById('wsRightHandle').addEventListener('mousedown', e=>{
+      if(e.target.closest('.col-toggle')) return;
+      e.preventDefault();
+      if(App.state.wsRightHidden){ App.state.wsRightHidden = false; this.colDrag = {side:'right', startX:e.clientX, startW:240}; }
+      else this.colDrag = {side:'right', startX:e.clientX, startW:App.state.wsRightW||342};
+      document.getElementById('wsRightHandle').classList.add('active');
+      this.applyCols();
+    });
+    document.getElementById('wsLeftToggle').addEventListener('click', ()=>{
+      App.state.wsLeftHidden = !App.state.wsLeftHidden;
+      this.applyCols(); App.save();
+    });
+    document.getElementById('wsRightToggle').addEventListener('click', ()=>{
+      App.state.wsRightHidden = !App.state.wsRightHidden;
+      this.applyCols(); App.save();
+    });
+    this.applyCols();
     document.getElementById('docList').addEventListener('click', e=>{
       const close = e.target.closest('.doc-close');
       const item = e.target.closest('.doc-item');
@@ -65,6 +93,25 @@ const WS = {
     }else{
       this.docEl.style.fontSize = (App.state.wsZoom||17)+'px';
     }
+  },
+
+  /* 左右侧栏宽度/隐藏/内容缩放 */
+  applyCols(){
+    const apply = (el, w, hidden, baseW, minZ, maxZ)=>{
+      if(!el) return;
+      if(hidden){ el.style.display = 'none'; return; }
+      el.style.display = '';
+      el.style.flex = 'none';
+      const z = Math.min(maxZ, Math.max(minZ, w/baseW));
+      el.style.zoom = z;
+      el.style.width = (w/z)+'px';
+    };
+    apply(this.leftEl, App.state.wsLeftW||252, App.state.wsLeftHidden, 252, 0.8, 1.35);
+    apply(this.rightEl, App.state.wsRightW||342, App.state.wsRightHidden, 342, 0.8, 1.4);
+    const lt = document.getElementById('wsLeftToggle');
+    const rt = document.getElementById('wsRightToggle');
+    if(lt) lt.textContent = App.state.wsLeftHidden ? '›' : '‹';
+    if(rt) rt.textContent = App.state.wsRightHidden ? '‹' : '›';
   },
 
   currentDoc(){ return this.docs.find(d=>d.id===this.activeId) || null; },
@@ -376,13 +423,15 @@ const WS = {
     if(span){
       e.preventDefault();
       const pageEl = e.target.closest('.pdf-page');
+      const overlayEl = e.target.closest('.pdf-overlay');
       const g = { kind:'word', doc, anchor:+span.dataset.i, cur:+span.dataset.i, mode:'pending',
-                  startX:e.clientX, startY:e.clientY, prev:[0,0], spanEl:span, pageEl:pageEl||null };
+                  startX:e.clientX, startY:e.clientY, prev:[0,0], spanEl:span, pageEl:pageEl||null,
+                  overlayEl:overlayEl||null, spans: overlayEl ? overlayEl.spans : null };
       this.gesture = g;
       g.timer = setTimeout(()=>{
         if(this.gesture!==g) return;
         g.mode = 'selecting';
-        if(!g.pageEl) this.applySel(g, g.anchor, g.anchor);
+        this.applySel(g, g.anchor, g.anchor);
       }, 380);
       return;
     }
@@ -408,6 +457,16 @@ const WS = {
   },
 
   onMove(e){
+    if(this.colDrag){
+      const d = this.colDrag;
+      if(d.side==='left'){
+        App.state.wsLeftW = Math.round(Math.max(160, Math.min(d.startW + (e.clientX - d.startX), 560)));
+      }else{
+        App.state.wsRightW = Math.round(Math.max(240, Math.min(d.startW - (e.clientX - d.startX), 700)));
+      }
+      this.applyCols();
+      return;
+    }
     const g = this.gesture;
     if(!g) return;
     if(g.kind==='region'){
@@ -424,14 +483,22 @@ const WS = {
     if(g.mode!=='selecting') return;
     const el = document.elementFromPoint(e.clientX, e.clientY);
     const span = el && el.closest ? el.closest('.ws-word') : null;
+    if(span && g.overlayEl && span.closest('.pdf-overlay')!==g.overlayEl) return;
     const idx = span && span.dataset.i!=null ? +span.dataset.i : g.cur;
-    if(idx!==g.cur){ g.cur = idx; if(!g.pageEl) this.applySel(g, g.anchor, g.cur); }
+    if(idx!==g.cur){ g.cur = idx; this.applySel(g, g.anchor, g.cur); }
     const r = this.docEl.getBoundingClientRect();
     if(e.clientY < r.top+46) this.docEl.scrollTop -= 26;
     else if(e.clientY > r.bottom-46) this.docEl.scrollTop += 26;
   },
 
   onUp(e){
+    if(this.colDrag){
+      this.colDrag = null;
+      document.getElementById('wsLeftHandle').classList.remove('active');
+      document.getElementById('wsRightHandle').classList.remove('active');
+      App.save();
+      return;
+    }
     const g = this.gesture;
     if(!g) return;
     this.gesture = null;
@@ -454,13 +521,12 @@ const WS = {
       return;
     }
     const a = Math.min(g.anchor, g.cur), b = Math.max(g.anchor, g.cur);
-    if(!g.pageEl){
-      this.clearSel(g);
-      const words = g.doc.spans.slice(a, b+1).map(s=>s.textContent.trim()).filter(Boolean);
-      if(!words.length) return;
-      if(words.length===1){ this.onWordClick(g.doc, g.doc.spans[a], e, null); return; }
-      this.showPhrasePopup(words.join(' '), e);
-    }
+    this.clearSel(g);
+    const spans = g.spans || g.doc.spans;
+    const words = spans.slice(a, b+1).map(s=>s.textContent.trim()).filter(Boolean);
+    if(!words.length) return;
+    if(words.length===1){ this.onWordClick(g.doc, spans[a], e, g.pageEl); return; }
+    this.showPhrasePopup(words.join(' '), e);
   },
 
   showSelRect(g){
@@ -484,14 +550,14 @@ const WS = {
 
   applySel(g, a, b){
     const [x,y] = [Math.min(a,b), Math.max(a,b)];
-    const spans = g.doc.spans;
+    const spans = g.spans || g.doc.spans;
     for(let i=g.prev[0]; i<=g.prev[1] && i<spans.length; i++) if(i<x||i>y) spans[i].classList.remove('sel');
     for(let i=x; i<=y; i++) spans[i].classList.add('sel');
     g.prev = [x,y];
   },
 
   clearSel(g){
-    const spans = g.doc.spans;
+    const spans = g.spans || g.doc.spans;
     for(let i=g.prev[0]; i<=g.prev[1] && i<spans.length; i++) spans[i].classList.remove('sel');
   },
 
@@ -576,6 +642,7 @@ const WS = {
       + '<button class="ov-act" data-ov="close" title="移除该识别框">✕</button></div>'
       + '<div class="pdf-overlay-text">'+this.buildHTML(text)+'</div>';
     pageEl.querySelector('.page-overlays').appendChild(ov);
+    ov.spans = [...ov.querySelectorAll('.ws-word')];
     st.overlays.push(ov);
     ov.querySelectorAll('[data-ov]').forEach(b=>{
       b.addEventListener('click', ()=>{
@@ -658,6 +725,7 @@ const WS = {
       return;
     }
     if(act==='toggleMark'){
+      if(!ctx.doc || !ctx.spanEl){ return; }
       let marked;
       if(ctx.overlay){
         marked = ctx.spanEl.classList.toggle('marked');
@@ -681,11 +749,42 @@ const WS = {
   },
 
   showWordPopup(word, entry, e, doc, idx, spanEl, overlay){
-    const marked = overlay ? spanEl.classList.contains('marked') : doc.marks.has(idx);
+    const marked = overlay ? spanEl.classList.contains('marked') : (doc ? doc.marks.has(idx) : false);
+    const fam = App.dictFamily(entry ? entry.w : word, 10);
     const ctx = { text:word, entry, isPhrase:false, doc, idx, spanEl, overlay,
                   onlineSenses:null, onlinePhon:'' };
-    this.renderDef(this.popupWordHTML(word, entry, marked), ctx);
+    this.renderDef(this.popupWordHTML(word, entry, marked, fam, !!doc), ctx);
+    this.bindFamActions();
     if(App.state.source==='youdao') this.fillOnline(ctx, word);
+  },
+
+  /* 词群成员点击 → 直接切换查看该词 */
+  showWordLookup(w){
+    const entry = App.dictLookup(w);
+    const fam = App.dictFamily(w, 10);
+    const ctx = { text:w, entry, isPhrase:false, doc:null, idx:null, spanEl:null, overlay:false,
+                  onlineSenses:null, onlinePhon:'' };
+    this.renderDef(this.popupWordHTML(w, entry, false, fam, false), ctx);
+    this.bindFamActions();
+    if(App.state.source==='youdao') this.fillOnline(ctx, w);
+  },
+
+  bindFamActions(){
+    this.defEl.querySelectorAll('[data-fam]').forEach(row=>{
+      row.addEventListener('click', e=>{
+        if(e.target.closest('[data-fam-add]')) return;
+        this.showWordLookup(row.dataset.fam);
+      });
+    });
+    this.defEl.querySelectorAll('[data-fam-add]').forEach(b=>{
+      b.addEventListener('click', e=>{
+        e.stopPropagation();
+        const w = b.dataset.famAdd;
+        const en = App.dictLookup(w);
+        MEM.add(w, en ? en.defs.join('\n') : '');
+        App.toast('已收录「'+w+'」到记忆区');
+      });
+    });
   },
 
   showPhrasePopup(phrase, e){
@@ -710,19 +809,31 @@ const WS = {
     });
   },
 
-  popupWordHTML(word, entry, marked){
+  popupWordHTML(word, entry, marked, fam, showMark){
     const chips = [];
     if(entry){
       if(entry.p) chips.push('<span class="popup-phon">'+App.esc(entry.p)+'</span>');
       if(entry.freq!=null) chips.push('<span class="chip">考研大纲词</span>');
       if(entry.cat) chips.push('<span class="chip gray">'+App.esc(entry.cat)+'</span>');
-      if(entry.fromWord) chips.push('<span class="chip gray">原形 '+App.esc(entry.w)+'</span>');
     }
     let body;
     if(entry){
-      body = entry.defs.map(d=>'<div class="def-line">'+App.esc(d)+'</div>').join('');
+      body = '<div class="origin-line">原形：<b>'+App.esc(entry.w)+'</b>'
+           + (entry.fromWord ? '（点选的是其变化形式）' : '') + '</div>'
+           + entry.defs.map(d=>'<div class="def-line">'+App.esc(d)+'</div>').join('');
     }else{
       body = '<div class="def-line note-line">未收录在考研词库中'+(App.state.source==='offline'?'，可切换顶栏词库来源为「有道词典（在线）」':'')+'</div>';
+    }
+    if(fam && fam.length){
+      body += '<div class="popup-section-title">词群释义（'+fam.length+'，点击查看 / 📥 收录）</div><div class="fam-list">'
+        + fam.map(f=>{
+            return '<div class="fam-row" data-fam="'+App.esc(f.w)+'" title="点击查看该词释义">'
+              + '<span class="fam-word">'+App.esc(f.w)+'</span>'
+              + (f.p?'<span class="popup-phon">'+App.esc(f.p)+'</span>':'')
+              + '<span class="fam-def">'+App.esc(f.defs[0]||'')+'</span>'
+              + '<button class="fam-add" data-fam-add="'+App.esc(f.w)+'" title="收录到记忆区">📥</button>'
+              + '</div>';
+          }).join('') + '</div>';
     }
     body += '<div class="popup-section-title" id="onlineTitle"'+(App.state.source!=='youdao'?' style="display:none"':'')+'>在线释义 · 有道</div><div id="onlineSec"></div>';
     return `<button class="popup-close" data-act="close" title="关闭">✕</button>
@@ -730,7 +841,7 @@ const WS = {
     <div class="popup-body">${body}</div>
     <div class="popup-foot">
       <button class="btn btn-primary" data-act="collect">📥 收录到记忆区</button>
-      <button class="btn btn-ghost" data-act="toggleMark">${marked?'取消标黄':'标黄'}</button>
+      ${showMark ? '<button class="btn btn-ghost" data-act="toggleMark">'+(marked?'取消标黄':'标黄')+'</button>' : ''}
       <button class="btn btn-ghost" data-act="dict">词典中打开</button>
     </div>`;
   },
