@@ -32,8 +32,19 @@ const WS = {
         scrollPending = false;
         const d = this.currentDoc();
         if(!d) return;
-        if(d.mode==='image') this.gcPageImages(d);
-        else this.gcTextBlocks(d);
+        if(d.mode==='image' || d.mode==='textview'){
+          if(d.mode==='image') this.gcPageImages(d);
+          // 滚动中：视口内页面立即绘制速览缩略图（拖到哪显示到哪）
+          const rootRect = this.docEl.getBoundingClientRect();
+          const pages = [...this.docEl.querySelectorAll('.pdf-page')];
+          const vis = pages.find(el=>{
+            const r = el.getBoundingClientRect();
+            return r.top < rootRect.bottom && r.bottom > rootRect.top;
+          });
+          if(vis) this.drawThumb(d, +vis.dataset.page, vis);
+        }else{
+          this.gcTextBlocks(d);
+        }
       });
     });
     // 手势
@@ -404,6 +415,57 @@ const WS = {
     delete el.dataset.done;
   },
 
+  /* ---------- PDF 速览缩略图：后台预生成，拖到哪显示到哪 ---------- */
+  startThumbs(doc){
+    if(doc._thumbStarted || !doc.pdf || doc.mode!=='image' || doc.photoFiles || doc.stitchSegs) return;
+    doc._thumbStarted = true;
+    doc.thumbs = doc.thumbs || {};
+    const start = doc.range ? doc.range.start : 1;
+    const end = doc.range ? doc.range.end : doc.pageCount;
+    let i = start;
+    const step = async ()=>{
+      if(doc !== this.currentDoc()) return;   // 文档已切换，停止
+      let done = 0;
+      while(i <= end && done < 3){
+        const p = i++;
+        if(doc.thumbs[p]){ done++; continue; }
+        try{
+          const page = await doc.pdf.getPage(p);
+          const vp = page.getViewport({scale: 0.42});
+          const c = document.createElement('canvas');
+          c.width = vp.width; c.height = vp.height;
+          const ctx = c.getContext('2d');
+          await page.render({canvasContext: ctx, viewport: vp}).promise;
+          doc.thumbs[p] = c.toDataURL('image/jpeg', 0.6);
+          page.cleanup();
+          c.width = c.height = 0;
+        }catch(e){ /* 单页失败忽略 */ }
+        done++;
+      }
+      if(i <= end && doc === this.currentDoc()){
+        setTimeout(step, 60);
+      }
+    };
+    step();
+  },
+
+  drawThumb(doc, pageNum, el){
+    const st = this.pageState(doc, pageNum);
+    const data = doc.thumbs && doc.thumbs[pageNum];
+    if(!data || st.rendered || st.thumb) return;
+    const img = new Image();
+    img.onload = ()=>{
+      if(st.rendered || !el.isConnected || this.currentDoc()!==doc) return;
+      const canvas = el.querySelector('.page-img');
+      canvas.width = img.width; canvas.height = img.height;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      canvas.style.aspectRatio = img.width + ' / ' + img.height;
+      canvas.classList.add('thumbed');
+      st.thumb = true;
+    };
+    img.src = data;
+  },
+
   /* ================= 文本查看器模式：转画布保持排版，区域框选识别 ================= */
   renderTextViewDoc(doc){
     if(!doc.tvSegs) doc.tvSegs = this.buildTextSegments(doc.text);
@@ -517,6 +579,7 @@ const WS = {
         for(const en of entries){
           if(en.isIntersecting){
             const el = en.target;
+            this.drawThumb(doc, +el.dataset.page, el);   // 速览图立即上屏
             const st = this.pageState(doc, +el.dataset.page);
             if(!st.rendered && !st.rendering) this.enqueuePageRender(doc, +el.dataset.page, el);
           }
@@ -527,6 +590,7 @@ const WS = {
     }else{
       this.docEl.querySelectorAll('.pdf-page').forEach(el=>this.renderPageImage(doc, +el.dataset.page, el));
     }
+    this.startThumbs(doc);
   },
 
   /* 页面渲染队列：最多 3 页并发，跳过的任务直接丢弃 */
@@ -572,7 +636,7 @@ const WS = {
     st.rendering = true;
     try{
       const page = await doc.pdf.getPage(pageNum);
-      const viewport = page.getViewport({scale: 2});
+      const viewport = page.getViewport({scale: 1.5});
       const canvas = el.querySelector('.page-img');
       canvas.width = viewport.width; canvas.height = viewport.height;
       canvas.style.aspectRatio = viewport.width + ' / ' + viewport.height;
@@ -583,6 +647,7 @@ const WS = {
       page.cleanup();
       st.rendered = true; st.rendering = false; st.task = null;
       canvas.classList.add('loaded');
+      canvas.classList.remove('thumbed');
     }catch(e){
       if(!(e && e.name==='RenderingCancelledException')) console.error('页面渲染失败', pageNum, e);
       st.rendering = false; st.task = null;
@@ -767,8 +832,9 @@ const WS = {
   freePageCanvas(el, st){
     if(st.task){ try{ st.task.cancel(); }catch(e){} st.task = null; }
     const canvas = el.querySelector('.page-img');
-    if(canvas){ canvas.width = canvas.height = 0; canvas.classList.remove('loaded'); }
+    if(canvas){ canvas.width = canvas.height = 0; canvas.classList.remove('loaded'); canvas.classList.remove('thumbed'); }
     st.rendered = false;
+    st.thumb = false;
   },
 
   /* ================= 手势 ================= */
@@ -971,7 +1037,7 @@ const WS = {
       let w = Math.max(1, Math.ceil(rectCss.w * sx)), h = Math.max(1, Math.ceil(rectCss.h * sy));
       x = Math.max(0, Math.min(x, cw-1)); y = Math.max(0, Math.min(y, ch-1));
       w = Math.min(w, cw-x); h = Math.min(h, ch-y);
-      const UP = Math.min(3, Math.sqrt((1600*1200) / Math.max(1, w*h)));   // 超大区域自适应缩放，控制 OCR 耗时
+      const UP = Math.min(4, Math.sqrt((2000*1500) / Math.max(1, w*h)));   // 超大区域自适应缩放，控制 OCR 耗时
       const t = document.createElement('canvas');
       t.width = Math.max(1, Math.round(w*UP)); t.height = Math.max(1, Math.round(h*UP));
       const tctx = t.getContext('2d');
