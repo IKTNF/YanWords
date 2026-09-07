@@ -34,6 +34,8 @@ const DICT = {
     const zh = /[\u4e00-\u9fff]/.test(q);
     this.resultsEl.innerHTML = '';
 
+    // 静态结果一次性拼接写入；在线卡片最后插入，避免 innerHTML 重建销毁异步节点
+    let staticHtml = '';
     if(!zh){
       const entry = App.dictLookup(q);
       const disp = String(q).trim();           // 展示/收录查询词本身（如 amazing），原形作为辅助信息
@@ -49,25 +51,27 @@ const DICT = {
         fam = App.dictFamily(disp, 10);
       }
       const forms = entry ? App.wordForms(entry.w, App.posOfEntry(entry)) : null;
-      if(entry) this.resultsEl.innerHTML += this.entryCard(entry, false, fam, disp, forms);
-      if(App.state.source==='youdao') this.onlineCard(disp);
+      if(entry) staticHtml += this.entryCard(entry, false, fam, disp, forms);
       if(!entry && App.state.source==='offline'){
-        this.resultsEl.innerHTML += '<div class="dict-card"><div class="note-line">离线词库中未找到「'+App.esc(disp)+'」，可切换顶栏词库来源为「有道词典（在线）」查询。</div></div>';
+        staticHtml += '<div class="dict-card"><div class="note-line">离线词库中未找到「'+App.esc(disp)+'」，可切换顶栏词库来源为「有道词典（在线）」查询。</div></div>';
       }
       const related = App.dictPrefix(disp, entry ? entry.w.toLowerCase() : null, 10);
       if(related.length){
-        this.resultsEl.innerHTML += '<div class="dict-card"><div class="popup-section-title">相近单词</div>'
+        staticHtml += '<div class="dict-card"><div class="popup-section-title">相近单词</div>'
           + related.map(r=>this.entryCard(r, true)).join('') + '</div>';
       }
+      this.resultsEl.innerHTML = staticHtml;
+      if(App.state.source==='youdao') this.onlineCard(disp);
     }else{
-      if(App.state.source==='youdao') this.onlineCard(q);
       const found = App.dictSearchZh(q);
       if(found.length){
-        this.resultsEl.innerHTML += '<div class="dict-card"><div class="popup-section-title">离线词库（考研）匹配 '+found.length+' 条</div>'
+        staticHtml += '<div class="dict-card"><div class="popup-section-title">离线词库（考研）匹配 '+found.length+' 条</div>'
           + found.map(r=>this.entryCard(r)).join('') + '</div>';
       }else if(App.state.source==='offline'){
-        this.resultsEl.innerHTML = '<div class="dict-card"><div class="note-line">离线词库释义中未找到「'+App.esc(q)+'」，可切换为「有道词典（在线）」查询。</div></div>';
+        staticHtml = '<div class="dict-card"><div class="note-line">离线词库释义中未找到「'+App.esc(q)+'」，可切换为「有道词典（在线）」查询。</div></div>';
       }
+      this.resultsEl.innerHTML = staticHtml;
+      if(App.state.source==='youdao') this.onlineCard(q);
     }
 
     if(!this.resultsEl.innerHTML.trim()) this.resultsEl.innerHTML = '<div class="empty small">无结果</div>';
