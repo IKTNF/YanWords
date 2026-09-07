@@ -346,7 +346,7 @@ const WS = {
     for(let i=start;i<=end;i++){
       html.push('<div class="pdf-page" data-page="'+i+'">'
         + '<div class="page-canvas-wrap">'
-        +   '<canvas class="page-img"></canvas>'
+        +   '<canvas class="page-img" style="aspect-ratio:'+(isPhoto?'4/3':'595/842')+'"></canvas>'
         +   '<div class="page-overlays"></div>'
         + '</div>'
         + '<div class="page-label">'+(isPhoto ? '第 '+(i-start+1)+' 张图' : '第 '+i+' 页')+' · 按住左键拖拽框选区域识别文字</div>'
@@ -389,6 +389,7 @@ const WS = {
       const viewport = page.getViewport({scale: 3});
       const canvas = el.querySelector('.page-img');
       canvas.width = viewport.width; canvas.height = viewport.height;
+      canvas.style.aspectRatio = viewport.width + ' / ' + viewport.height;
       const ctx = canvas.getContext('2d');
       await page.render({canvasContext: ctx, viewport}).promise;
       page.cleanup();
@@ -418,6 +419,7 @@ const WS = {
       const canvas = el.querySelector('.page-img');
       canvas.width = Math.round(img.naturalWidth * scale);
       canvas.height = Math.round(img.naturalHeight * scale);
+      canvas.style.aspectRatio = canvas.width + ' / ' + canvas.height;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(url);
@@ -868,6 +870,7 @@ const WS = {
     App.fetchOnline(q).then(res=>{
       if(this.popupCtx!==ctx) return;
       ctx.onlineSenses = res.senses; ctx.onlinePhon = res.phonetic;
+      if(title) title.textContent = '在线释义 · '+(res.source==='bing' ? '必应' : '有道');
       if(res.error){ sec.innerHTML = '<div class="note-line">在线查询失败：'+App.esc(res.error)+'</div>'; return; }
       if(res.senses.length){ sec.innerHTML = res.senses.map(s=>'<div class="def-line">'+App.esc(s)+'</div>').join(''); }
       else sec.innerHTML = '<div class="note-line">在线词典无结果</div>';

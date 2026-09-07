@@ -183,15 +183,42 @@ const App = {
 
   async fetchOnline(q){
     try{
-      const r = await fetch('/api/dict?q='+encodeURIComponent(q)+'&source=youdao', {signal: AbortSignal.timeout(12000)});
+      const r = await fetch('/api/dict?q='+encodeURIComponent(q)+'&source=youdao', {signal: AbortSignal.timeout(15000)});
       const d = await r.json();
-      if(!r.ok || d.error) return { senses:[], phonetic:'', error:(d&&d.error)||('HTTP '+r.status) };
-      const p = this.parseYoudao(d);
-      return { senses:p.senses, phonetic:p.phonetic, error:'' };
+      if(!r.ok || d.error) return { senses:[], phonetic:'', source:'', error:(d&&d.error)||('HTTP '+r.status) };
+      return { senses:d.senses||[], phonetic:d.phonetic||'', source:d.source||'', error:'' };
     }catch(e){
       const timedOut = e && (e.name==='TimeoutError' || e.name==='AbortError');
-      return { senses:[], phonetic:'', error: timedOut ? '在线查询超时，请稍后重试或改用内置离线词库' : String(e&&e.message||e) };
+      return { senses:[], phonetic:'', source:'', error: timedOut ? '在线词典连接超时，请稍后重试或改用内置离线词库' : String(e&&e.message||e) };
     }
+  },
+
+  /* ---------- 词性判断与词形变化 ---------- */
+  posOfText(text){
+    const t = String(text||'').toLowerCase();
+    if(/\b(vt?|vi|v|verb)\s*[.．·]/.test(t)) return 'verb';
+    if(/\b(adj|a)\s*[.．·]/.test(t)) return 'adj';
+    return '';
+  },
+  posOfEntry(entry){
+    return entry ? this.posOfText(entry.defs.join('\n')) : '';
+  },
+  wordForms(base, pos){
+    base = String(base||'').toLowerCase().replace(/[^a-z]/g,'');
+    if(!base || base.length<2) return null;
+    if(pos==='verb'){
+      const v = VERB_IRREG[base];
+      if(v) return {label:'动词时态', items:[['三单',v[0]],['过去式',v[1]],['过去分词',v[2]],['现在分词',v[3]]]};
+      const f = regVerbForms(base);
+      return {label:'动词时态', items:[['三单',f.s],['过去式',f.past],['过去分词',f.pp],['现在分词',f.ing]]};
+    }
+    if(pos==='adj'){
+      const v = ADJ_IRREG[base];
+      if(v) return {label:'形容词变化', items:[['比较级',v[0]],['最高级',v[1]]]};
+      const f = adjForms(base);
+      return {label:'形容词变化', items:[['比较级',f.c],['最高级',f.s]]};
+    }
+    return null;
   }
 };
 
@@ -253,6 +280,100 @@ function wordsSameFamily(a, b){
   for(const x of A){ if(B.has(x)) return true; }
   // 最长公共子串 >= 5 视为同族（覆盖 generate/generation、generate/regeneration 等）
   return lcsLen(a, b) >= 5;
+}
+
+/* ---------- 不规则动词表: base → [三单, 过去式, 过去分词, 现在分词] ---------- */
+const VERB_IRREG = {
+  be:['is','was/were','been','being'], have:['has','had','had','having'], do:['does','did','done','doing'],
+  go:['goes','went','gone','going'], make:['makes','made','made','making'], take:['takes','took','taken','taking'],
+  get:['gets','got','got/gotten','getting'], give:['gives','gave','given','giving'], come:['comes','came','come','coming'],
+  see:['sees','saw','seen','seeing'], know:['knows','knew','known','knowing'], think:['thinks','thought','thought','thinking'],
+  say:['says','said','said','saying'], tell:['tells','told','told','telling'], become:['becomes','became','become','becoming'],
+  find:['finds','found','found','finding'], feel:['feels','felt','felt','feeling'], leave:['leaves','left','left','leaving'],
+  bring:['brings','brought','brought','bringing'], buy:['buys','bought','bought','buying'], catch:['catches','caught','caught','catching'],
+  teach:['teaches','taught','taught','teaching'], fight:['fights','fought','fought','fighting'], seek:['seeks','sought','sought','seeking'],
+  keep:['keeps','kept','kept','keeping'], sleep:['sleeps','slept','slept','sleeping'], speak:['speaks','spoke','spoken','speaking'],
+  write:['writes','wrote','written','writing'], run:['runs','ran','run','running'], sit:['sits','sat','sat','sitting'],
+  stand:['stands','stood','stood','standing'], understand:['understands','understood','understood','understanding'],
+  win:['wins','won','won','winning'], lose:['loses','lost','lost','losing'], pay:['pays','paid','paid','paying'],
+  mean:['means','meant','meant','meaning'], meet:['meets','met','met','meeting'], send:['sends','sent','sent','sending'],
+  spend:['spends','spent','spent','spending'], build:['builds','built','built','building'], lead:['leads','led','led','leading'],
+  hold:['holds','held','held','holding'], grow:['grows','grew','grown','growing'], draw:['draws','drew','drawn','drawing'],
+  fly:['flies','flew','flown','flying'], drive:['drives','drove','driven','driving'], ride:['rides','rode','ridden','riding'],
+  wear:['wears','wore','worn','wearing'], choose:['chooses','chose','chosen','choosing'], begin:['begins','began','begun','beginning'],
+  drink:['drinks','drank','drunk','drinking'], eat:['eats','ate','eaten','eating'], fall:['falls','fell','fallen','falling'],
+  break:['breaks','broke','broken','breaking'], forget:['forgets','forgot','forgotten','forgetting'],
+  throw:['throws','threw','thrown','throwing'], strike:['strikes','struck','struck','striking'],
+  bear:['bears','bore','borne/born','bearing'], swear:['swears','swore','sworn','swearing'], tear:['tears','tore','torn','tearing'],
+  rise:['rises','rose','risen','rising'], shake:['shakes','shook','shaken','shaking'], show:['shows','showed','shown/showed','showing'],
+  sing:['sings','sang','sung','singing'], ring:['rings','rang','rung','ringing'], swim:['swims','swam','swum','swimming'],
+  steal:['steals','stole','stolen','stealing'], weave:['weaves','wove','woven','weaving'], deal:['deals','dealt','dealt','dealing'],
+  sell:['sells','sold','sold','selling'], hear:['hears','heard','heard','hearing'], read:['reads','read','read','reading'],
+  cut:['cuts','cut','cut','cutting'], put:['puts','put','put','putting'], set:['sets','set','set','setting'],
+  cost:['costs','cost','cost','costing'], hit:['hits','hit','hit','hitting'], hurt:['hurts','hurt','hurt','hurting'],
+  let:['lets','let','let','letting'], shut:['shuts','shut','shut','shutting'], spread:['spreads','spread','spread','spreading'],
+  burst:['bursts','burst','burst','bursting'], cast:['casts','cast','cast','casting'], bend:['bends','bent','bent','bending'],
+  lend:['lends','lent','lent','lending'], blow:['blows','blew','blown','blowing'], freeze:['freezes','froze','frozen','freezing'],
+  awake:['awakes','awoke','awoken','awaking'], wake:['wakes','woke','woken','waking'], arise:['arises','arose','arisen','arising'],
+  lay:['lays','laid','laid','laying'], lie:['lies','lay','lain','lying'], light:['lights','lit/lighted','lit/lighted','lighting'],
+  shine:['shines','shone','shone','shining'], shoot:['shoots','shot','shot','shooting'], slide:['slides','slid','slid','sliding'],
+  spin:['spins','spun','spun','spinning'], split:['splits','split','split','splitting'], stick:['sticks','stuck','stuck','sticking'],
+  sting:['stings','stung','stung','stinging'], swing:['swings','swung','swung','swinging'], dig:['digs','dug','dug','digging'],
+  feed:['feeds','fed','fed','feeding'], flee:['flees','fled','fled','fleeing'], forbid:['forbids','forbade','forbidden','forbidding'],
+  forgive:['forgives','forgave','forgiven','forgiving'], grind:['grinds','ground','ground','grinding'], hang:['hangs','hung','hung','hanging'],
+  hide:['hides','hid','hidden','hiding'], lean:['leans','leant/leaned','leant/leaned','leaning'], leap:['leaps','leapt/leaped','leapt/leaped','leaping'],
+  quit:['quits','quit/quitted','quit/quitted','quitting'], rid:['rids','rid','rid','ridding'], sew:['sews','sewed','sewn/sewed','sewing'],
+  shave:['shaves','shaved','shaven/shaved','shaving'], shed:['sheds','shed','shed','shedding'], shrink:['shrinks','shrank/shrunk','shrunk','shrinking'],
+  sink:['sinks','sank/sunk','sunk','sinking'], smell:['smells','smelt/smelled','smelt/smelled','smelling'],
+  spring:['springs','sprang','sprung','springing'], stink:['stinks','stank','stunk','stinking'], strive:['strives','strove','striven','striving'],
+  sweep:['sweeps','swept','swept','sweeping'], thrust:['thrusts','thrust','thrust','thrusting'], upset:['upsets','upset','upset','upsetting'],
+  withdraw:['withdraws','withdrew','withdrawn','withdrawing'], withhold:['withholds','withheld','withheld','withholding'],
+  undergo:['undergoes','underwent','undergone','undergoing'], undertake:['undertakes','undertook','undertaken','undertaking'],
+  overcome:['overcomes','overcame','overcome','overcoming'], overlook:['overlooks','overlooked','overlooked','overlooking'],
+  outgrow:['outgrows','outgrew','outgrown','outgrowing'], rewrite:['rewrites','rewrote','rewritten','rewriting'],
+  rebuild:['rebuilds','rebuilt','rebuilt','rebuilding'], rethink:['rethinks','rethought','rethought','rethinking'],
+  redo:['redoes','redid','redone','redoing'], repay:['repays','repaid','repaid','repaying'], mislead:['misleads','misled','misled','misleading'],
+  misunderstand:['misunderstands','misunderstood','misunderstood','misunderstanding'], foresee:['foresees','foresaw','foreseen','foreseeing'],
+  forecast:['forecasts','forecast/forecasted','forecast/forecasted','forecasting'], broadcast:['broadcasts','broadcast','broadcast','broadcasting'],
+  bind:['binds','bound','bound','binding'], bleed:['bleeds','bled','bled','bleeding'], breed:['breeds','bred','bred','breeding'],
+  burn:['burns','burnt/burned','burnt/burned','burning'], dream:['dreams','dreamt/dreamed','dreamt/dreamed','dreaming'],
+  dwell:['dwells','dwelt/dwelled','dwelt/dwelled','dwelling'], kneel:['kneels','knelt/kneeled','knelt/kneeled','kneeling'],
+  spell:['spells','spelt/spelled','spelt/spelled','spelling'], spoil:['spoils','spoilt/spoiled','spoilt/spoiled','spoiling']
+};
+
+/* ---------- 不规则形容词: base → [比较级, 最高级] ---------- */
+const ADJ_IRREG = {
+  good:['better','best'], bad:['worse','worst'], little:['less','least'],
+  many:['more','most'], much:['more','most'], far:['farther/further','farthest/furthest'],
+  old:['older/elder','oldest/eldest']
+};
+
+/* 规则动词变化 */
+function regVerbForms(base){
+  let s;
+  if(/(s|x|z|ch|sh|o)$/.test(base)) s = base+'es';
+  else if(/[^aeiou]y$/.test(base)) s = base.slice(0,-1)+'ies';
+  else s = base+'s';
+  const yEnd = /[^aeiou]y$/.test(base);
+  const stem = yEnd ? base.slice(0,-1)+'i' : base;
+  let past = base.endsWith('e') ? base+'d' : (yEnd ? stem+'ed' : base+'ed');
+  let ing = base.endsWith('e') ? base.slice(0,-1)+'ing' : base+'ing';
+  // CVC 双写（run→running, stop→stopped）
+  if(/[^aeiou][aeiou][^aeiouwxy]$/.test(base)){
+    past = base + base[base.length-1] + 'ed';
+    ing = base + base[base.length-1] + 'ing';
+  }
+  return {s, past, pp:past, ing};
+}
+
+/* 规则形容词比较级/最高级 */
+function adjForms(base){
+  if(/[^aeiou][aeiou][^aeiouwxy]$/.test(base)) return {c:base+base[base.length-1]+'er', s:base+base[base.length-1]+'est'};
+  if(/[^aeiou]y$/.test(base)){ const st = base.slice(0,-1); return {c:st+'ier', s:st+'iest'}; }
+  if(base.endsWith('e')) return {c:base+'r', s:base+'st'};
+  const vowels = (base.match(/[aeiouy]+/g)||[]).length;
+  if(vowels>=3 || base.length>=9 || /(ful|less|ous|ive|ing|ed|able|ible|al|ic|ent|ant)$/.test(base)) return {c:'more '+base, s:'most '+base};
+  return {c:base+'er', s:base+'est'};
 }
 
 document.addEventListener('DOMContentLoaded', ()=>App.boot());

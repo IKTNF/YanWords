@@ -17,15 +17,68 @@ const MIME = {
 
 function inRoot(p){ const r = path.resolve(p); return r === ROOT || r.startsWith(ROOT + path.sep); }
 
-async function youdao(q){
+/* ---- 有道 jsonapi：解析成统一格式 ---- */
+function parseYoudao(d){
+  const out = { phonetic:'', senses:[] };
+  if(!d || typeof d!=='object') return out;
+  const w0 = d.ec && d.ec.word && d.ec.word[0];
+  if(w0){
+    const ph = w0.usphone||w0.ukphone;
+    if(ph) out.phonetic = '['+ph+']';
+    for(const t of (w0.trs||[])){
+      for(const x of (t.tr||[])){
+        const i = x.l && x.l.i;
+        if(Array.isArray(i)) for(const s of i){ if(s && !out.senses.includes(s)) out.senses.push(s); }
+      }
+    }
+  }
+  if(!out.senses.length){
+    const wt = d.web_trans && d.web_trans['web-translation'];
+    if(Array.isArray(wt)) for(const t of wt){ if(t.value && !out.senses.includes(t.value)) out.senses.push(t.value); }
+  }
+  if(!out.senses.length){
+    const sm = d.simple && d.simple.word;
+    if(Array.isArray(sm)) for(const w of sm){
+      const pre = w.usphone ? '['+w.usphone+'] ' : '';
+      for(const s of (w.means||[])){ const v = pre+s; if(v && !out.senses.includes(v)) out.senses.push(v); }
+    }
+  }
+  return out;
+}
+
+async function youdaoParsed(q){
   const u = 'https://dict.youdao.com/jsonapi?q=' + encodeURIComponent(q)
     + '&dicts=' + encodeURIComponent(JSON.stringify({count:99, dicts:[["ec","blng_sents_part","web_trans"]]}));
   const r = await fetch(u, {
     headers: { 'User-Agent': UA, 'Referer': 'https://dict.youdao.com/' },
-    signal: AbortSignal.timeout(10000)
+    signal: AbortSignal.timeout(6000)
   });
   if(!r.ok) throw new Error('youdao HTTP ' + r.status);
-  return await r.json();
+  const p = parseYoudao(await r.json());
+  if(!p.senses.length) throw new Error('youdao empty');
+  return { source:'youdao', phonetic:p.phonetic, senses:p.senses.slice(0,20) };
+}
+
+/* ---- 必应词典：兜底源，HTML 解析 ---- */
+async function bingParsed(q){
+  const r = await fetch('https://cn.bing.com/dict/search?q=' + encodeURIComponent(q), {
+    headers: { 'User-Agent': UA },
+    signal: AbortSignal.timeout(6000)
+  });
+  if(!r.ok) throw new Error('bing HTTP ' + r.status);
+  const html = await r.text();
+  const senses = [];
+  const re = /<span class="pos"[^>]*>([^<]+)<\/span>\s*<span class="def[^"]*"[^>]*>([\s\S]*?)<\/span>/g;
+  let m;
+  while((m = re.exec(html)) && senses.length < 12){
+    const def = String(m[2]).replace(/<[^>]+>/g,'').replace(/&nbsp;|&#160;/g,' ').replace(/\s+/g,' ').trim();
+    if(def) senses.push(m[1].trim()+' '+def);
+  }
+  if(!senses.length) throw new Error('bing empty');
+  let phonetic = '';
+  const pm = html.match(/class="(?:hd_prUS|pr b_primtxt|hd_pr)[^"]*"[^>]*>\s*([^<]{1,40})\s*</);
+  if(pm) phonetic = pm[1].trim();
+  return { source:'bing', phonetic, senses };
 }
 
 const server = http.createServer(async (req, res)=>{
@@ -41,7 +94,17 @@ const server = http.createServer(async (req, res)=>{
         res.end(JSON.stringify({error:'缺少参数 q'}));
         return;
       }
-      const data = await youdao(q);
+      // 多源兜底：有道 → 必应，确保在线查询尽快出结果
+      let data = null;
+      try{ data = await youdaoParsed(q); }catch(e){ console.log('youdao fail:', e.message); }
+      if(!data){
+        try{ data = await bingParsed(q); }catch(e){ console.log('bing fail:', e.message); }
+      }
+      if(!data){
+        res.writeHead(502, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store', 'Access-Control-Allow-Origin':'*'});
+        res.end(JSON.stringify({error:'在线词典暂时不可用（已尝试有道/必应），请使用内置离线词库'}));
+        return;
+      }
       res.writeHead(200, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store', 'Access-Control-Allow-Origin':'*'});
       res.end(JSON.stringify(data));
       return;

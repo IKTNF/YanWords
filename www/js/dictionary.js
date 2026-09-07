@@ -36,23 +36,25 @@ const DICT = {
 
     if(!zh){
       const entry = App.dictLookup(q);
+      const disp = String(q).trim();           // 展示/收录查询词本身（如 amazing），原形作为辅助信息
       let fam = [];
       if(entry){
-        const clean = q.toLowerCase().replace(/[^a-z]/g,'');
+        const clean = disp.toLowerCase().replace(/[^a-z]/g,'');
         if(clean && clean !== entry.w.toLowerCase()){
           fam = [entry, ...App.dictFamily(entry.w, 9)];   // 派生形式：原形排词群首位
         }else{
           fam = App.dictFamily(entry.w, 10);
         }
       }else{
-        fam = App.dictFamily(q, 10);
+        fam = App.dictFamily(disp, 10);
       }
-      if(entry) this.resultsEl.innerHTML += this.entryCard(entry, false, fam);
-      if(App.state.source==='youdao') this.onlineCard(q);
+      const forms = entry ? App.wordForms(entry.w, App.posOfEntry(entry)) : null;
+      if(entry) this.resultsEl.innerHTML += this.entryCard(entry, false, fam, disp, forms);
+      if(App.state.source==='youdao') this.onlineCard(disp);
       if(!entry && App.state.source==='offline'){
-        this.resultsEl.innerHTML += '<div class="dict-card"><div class="note-line">离线词库中未找到「'+App.esc(q)+'」，可切换顶栏词库来源为「有道词典（在线）」查询。</div></div>';
+        this.resultsEl.innerHTML += '<div class="dict-card"><div class="note-line">离线词库中未找到「'+App.esc(disp)+'」，可切换顶栏词库来源为「有道词典（在线）」查询。</div></div>';
       }
-      const related = App.dictPrefix(q, entry ? entry.w.toLowerCase() : null, 10);
+      const related = App.dictPrefix(disp, entry ? entry.w.toLowerCase() : null, 10);
       if(related.length){
         this.resultsEl.innerHTML += '<div class="dict-card"><div class="popup-section-title">相近单词</div>'
           + related.map(r=>this.entryCard(r, true)).join('') + '</div>';
@@ -72,12 +74,16 @@ const DICT = {
     this.resultsEl.scrollIntoView({block:'start'});
   },
 
-  entryCard(entry, mini, fam){
+  entryCard(entry, mini, fam, disp, forms){
     const chips = [];
     if(entry.freq!=null) chips.push('<span class="chip">考研大纲词</span>');
     if(entry.freq) chips.push('<span class="chip gray">词频 '+entry.freq+'</span>');
     if(entry.cat && entry.freq==null) chips.push('<span class="chip gray">'+App.esc(entry.cat)+'</span>');
     if(entry.fromWord) chips.push('<span class="chip gray">原形 '+App.esc(entry.w)+'</span>');
+    const title = disp || entry.w;
+    const formsHtml = (!mini && forms)
+      ? '<div class="forms-line">'+App.esc(forms.label)+'：'+forms.items.map(([k,v])=>k+' '+App.esc(v)).join(' · ')+'</div>'
+      : '';
     const famHtml = (!mini && fam && fam.length)
       ? '<div class="popup-section-title">词群释义（'+fam.length+'，点击查询 / 📥 收录）</div><div class="fam-list">'
         + fam.map(f=>{
@@ -92,10 +98,11 @@ const DICT = {
           }).join('') + '</div>'
       : '';
     return `<div class="dict-card${mini?' mini':''}">
-      <div class="dict-card-head"><span class="popup-word">${App.esc(entry.w)}</span>${entry.p?'<span class="popup-phon">'+App.esc(entry.p)+'</span>':''}${chips.join('')}</div>
+      <div class="dict-card-head"><span class="popup-word">${App.esc(title)}</span>${entry && title.toLowerCase()!==entry.w.toLowerCase()?'<span class="chip gray">原形 '+App.esc(entry.w)+'</span>':''}${entry.p?'<span class="popup-phon">'+App.esc(entry.p)+'</span>':''}${chips.join('')}</div>
       <div class="defs">${entry.defs.map(d=>App.esc(d)).join('\n')}</div>
+      ${formsHtml}
       ${famHtml}
-      ${mini?'':'<button class="btn btn-primary collect-btn" data-collect="'+App.esc(entry.w)+'">📥 收录到记忆区</button>'}
+      ${mini?'':'<button class="btn btn-primary collect-btn" data-collect="'+App.esc(title)+'">📥 收录到记忆区</button>'}
     </div>`;
   },
 
@@ -107,7 +114,8 @@ const DICT = {
     host.appendChild(box);
     this.resultsEl.insertBefore(host, this.resultsEl.firstChild);
     App.fetchOnline(q).then(res=>{
-      let html = '<div class="online-tag">在线 · 有道词典</div>';
+      const srcName = res.source==='bing' ? '必应词典' : '有道词典';
+      let html = '<div class="online-tag">在线 · '+srcName+'</div>';
       if(res.error){
         html += '<div class="note-line">在线查询失败：'+App.esc(res.error)+'（离线词库不受影响）</div>';
       }else if(res.senses.length){

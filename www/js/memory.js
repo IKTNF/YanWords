@@ -86,6 +86,15 @@ const MEM = {
     if(e.target.classList.contains('mem-word')) it.w = e.target.textContent.replace(/\s+/g,' ').trim() || it.w;
     else it.d = e.target.textContent;
     this.save();
+    // 词形变化随编辑实时刷新（只更新该行，不打断输入）
+    const fEl = row.querySelector('.mem-forms');
+    const entry = App.dictLookup(it.w);
+    const pos = App.posOfText(it.d) || (entry ? App.posOfEntry(entry) : '');
+    const base = entry ? entry.w : String(it.w).toLowerCase().replace(/[^a-z]/g,'');
+    const forms = App.wordForms(base, pos);
+    if(fEl){
+      fEl.textContent = forms ? (forms.label+'：'+forms.items.map(([k,v])=>k+' '+v).join(' · ')) : '';
+    }
   },
 
   /* 记忆区缩放：只作用于单词/释义列表区域，工具栏（含滑条）保持固定 */
@@ -163,10 +172,20 @@ const MEM = {
       const byId = new Map(this.items.map((it,i)=>[it.id,i]));
       this.listEl.innerHTML = items.map(it=>{
         const idx = (byId.get(it.id)!=null?byId.get(it.id):0)+1;
+        const entry = App.dictLookup(it.w);
+        const pos = App.posOfText(it.d) || (entry ? App.posOfEntry(entry) : '');
+        const base = entry ? entry.w : String(it.w).toLowerCase().replace(/[^a-z]/g,'');
+        const forms = App.wordForms(base, pos);
+        const formsHtml = forms
+          ? '<div class="mem-forms">'+App.esc(forms.label)+'：'+forms.items.map(([k,v])=>k+' '+App.esc(v)).join(' · ')+'</div>'
+          : '';
         return `<div class="mem-row" data-id="${App.esc(it.id)}">
           <div class="mem-idx">${idx}</div>
           <div class="mem-body">
-            <div class="mem-word" contenteditable="true" spellcheck="false">${App.esc(it.w)}</div>
+            <div class="mem-wcol">
+              <div class="mem-word" contenteditable="true" spellcheck="false">${App.esc(it.w)}</div>
+              ${formsHtml}
+            </div>
             <div class="mem-meaning" contenteditable="true" spellcheck="false">${App.esc(it.d)}</div>
           </div>
           <button class="mem-del" title="删除">✕</button>
