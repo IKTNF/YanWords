@@ -1,0 +1,23 @@
+# 统一换行与二进制声明
+* text=auto
+
+# 源码统一 LF
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.py text eol=lf
+*.bat text eol=crlf
+
+# 二进制不转换
+*.otf binary
+*.ttf binary
+*.wasm binary
+*.traineddata binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary
+*.pdf binary
+*.docx binary
