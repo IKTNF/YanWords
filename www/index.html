@@ -36,8 +36,8 @@
     <aside class="ws-side" id="wsSide">
       <div class="side-card">
         <button class="btn btn-primary btn-block" id="btnUpload">📂 上传资料</button>
-        <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt,.md" multiple hidden>
-        <div class="upload-hint">支持 PDF / Word / TXT（≤1GB），可多选；也可把文件直接拖进右侧阅读区。超过 300 页的 PDF 解析前可自选页码范围</div>
+        <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt,.md,.jpg,.jpeg,.png,.webp,.bmp,.gif" multiple hidden>
+        <div class="upload-hint">支持 PDF / Word / TXT / 图片（jpg、png、webp 等），可多选；也可把文件直接拖进右侧阅读区。超过 300 页的 PDF 解析前可自选页码范围；图片与扫描版 PDF 一样：长按拖拽框选区域识别文字</div>
       </div>
       <div class="side-card">
         <div class="side-title">已上传文档</div>
@@ -98,6 +98,8 @@
         </div>
         <button class="btn" id="btnExportWord" title="按当前顺序导出全部记录">⬇ 导出 Word</button>
         <button class="btn" id="btnExportPdf" title="按当前顺序导出全部记录">⬇ 导出 PDF</button>
+        <button class="btn" id="btnImport" title="从 Word/PDF 导入记忆区（与导出的格式一致，追加到末尾）">📥 导入</button>
+        <input type="file" id="fileImport" accept=".docx,.pdf" multiple hidden>
         <button class="btn" id="btnOrg" title="把同一词族的单词整理到一起">🔀 整理</button>
         <button class="btn btn-danger-ghost" id="btnClearMem">清空</button>
       </div>

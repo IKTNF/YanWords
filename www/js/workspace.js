@@ -118,8 +118,14 @@ const WS = {
 
   /* ================= 文件处理 ================= */
   async handleFiles(files){
+    const IMG = ['jpg','jpeg','png','webp','bmp','gif'];
+    const extOf = f => (f.name.split('.').pop()||'').toLowerCase();
+    // 图片统一合并为一个「图片模式」文档，每张图一页
+    const imgs = files.filter(f=>IMG.includes(extOf(f)));
+    if(imgs.length) this.addPhotoDoc(imgs);
     for(const f of files){
-      const ext = (f.name.split('.').pop()||'').toLowerCase();
+      const ext = extOf(f);
+      if(IMG.includes(ext)) continue;
       if(!['pdf','docx','doc','txt','md'].includes(ext)){ App.toast('不支持的文件类型：'+f.name,'err'); continue; }
       const mb = f.size/1048576;
       if(f.size > 1024*1024*1024){ App.toast('文件过大（>1GB）：'+f.name+'，请先用 PDF 工具拆分后上传','err'); continue; }
@@ -259,6 +265,23 @@ const WS = {
     return doc;
   },
 
+  /* 图片上传：与扫描模式相同的框选识别流程 */
+  addPhotoDoc(files){
+    const name = files.length>1
+      ? '照片组（'+files.length+' 张）· '+files.map(f=>f.name).slice(0,3).join('、')
+      : files[0].name;
+    const size = files.reduce((s,f)=>s+f.size,0);
+    const doc = this.createDoc(name, size, files[0].lastModified, '');
+    doc.mode = 'image';
+    doc.photoFiles = files;
+    doc.pageCount = files.length;
+    doc.range = {start:1, end:files.length};
+    doc.pages = [];
+    this.renderDocList();
+    this.activateDoc(doc.id);
+    App.toast('已以图片模式打开（'+files.length+' 张）：按住左键拖拽框选区域即可识别文字');
+  },
+
   activateDoc(id){
     this.activeId = id;
     this.renderDocList();
@@ -317,6 +340,7 @@ const WS = {
   renderImageDoc(doc){
     const start = doc.range ? doc.range.start : 1;
     const end = doc.range ? doc.range.end : doc.pageCount;
+    const isPhoto = !!doc.photoFiles;
     doc.pageRange = [start, end];
     const html = [];
     for(let i=start;i<=end;i++){
@@ -325,7 +349,7 @@ const WS = {
         +   '<canvas class="page-img"></canvas>'
         +   '<div class="page-overlays"></div>'
         + '</div>'
-        + '<div class="page-label">第 '+i+' 页 · 按住左键拖拽框选区域识别文字</div>'
+        + '<div class="page-label">'+(isPhoto ? '第 '+(i-start+1)+' 张图' : '第 '+i+' 页')+' · 按住左键拖拽框选区域识别文字</div>'
         + '</div>');
     }
     this.docEl.innerHTML = html.join('');
@@ -355,6 +379,7 @@ const WS = {
   },
 
   async renderPageImage(doc, pageNum, el){
+    if(doc.photoFiles) return this.renderPhoto(doc, pageNum, el);
     if(!doc.pdf) return;
     const st = this.pageState(doc, pageNum);
     if(st.rendered || st.rendering) return;
@@ -371,6 +396,35 @@ const WS = {
       canvas.classList.add('loaded');
     }catch(e){
       console.error('页面渲染失败', pageNum, e);
+      st.rendering = false;
+    }
+  },
+
+  async renderPhoto(doc, pageNum, el){
+    const st = this.pageState(doc, pageNum);
+    if(st.rendered || st.rendering) return;
+    st.rendering = true;
+    try{
+      const f = doc.photoFiles[pageNum-1];
+      const url = URL.createObjectURL(f);
+      const img = await new Promise((res, rej)=>{
+        const im = new Image();
+        im.onload = ()=>res(im);
+        im.onerror = ()=>rej(new Error('图片解码失败'));
+        im.src = url;
+      });
+      const MAX = 2600;
+      const scale = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = el.querySelector('.page-img');
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      st.rendered = true; st.rendering = false;
+      canvas.classList.add('loaded');
+    }catch(e){
+      console.error('图片加载失败', pageNum, e);
       st.rendering = false;
     }
   },

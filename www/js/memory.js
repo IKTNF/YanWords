@@ -15,6 +15,12 @@ const MEM = {
     document.getElementById('btnExportPdf').addEventListener('click', ()=>exportPdfDoc());
     document.getElementById('btnClearMem').addEventListener('click', ()=>this.clearAll());
     document.getElementById('btnOrg').addEventListener('click', ()=>this.openOrg());
+    document.getElementById('btnImport').addEventListener('click', ()=>document.getElementById('fileImport').click());
+    document.getElementById('fileImport').addEventListener('change', async e=>{
+      const files = [...e.target.files];
+      e.target.value = '';
+      await this.handleImport(files);
+    });
     document.getElementById('memZoom').addEventListener('input', e=>{
       App.state.memZoom = +e.target.value;
       document.getElementById('memZoomVal').textContent = e.target.value+'px';
@@ -84,6 +90,69 @@ const MEM = {
 
   /* 记忆区缩放：只作用于单词/释义列表区域，工具栏（含滑条）保持固定 */
   applyZoom(){ if(this.listWrap) this.listWrap.style.fontSize = (App.state.memZoom||16)+'px'; },
+
+  /* ================= 导入（Word / PDF，与导出的格式互通） ================= */
+  async handleImport(files){
+    const entries = [];
+    for(const f of files){
+      const ext = (f.name.split('.').pop()||'').toLowerCase();
+      try{
+        let text = '';
+        if(ext==='docx'||ext==='doc') text = await this.importDocx(f);
+        else if(ext==='pdf') text = await this.importPdf(f);
+        else { App.toast('仅支持导入 Word(.docx) / PDF：'+f.name,'err'); continue; }
+        if(!text.trim()){ App.toast('未提取到文字内容：'+f.name+'（扫描版 PDF 请先在扫描模式框选识别后收录）','err'); continue; }
+        const es = parseImportEntries(text);
+        if(!es.length){ App.toast('未从文件中解析出词条：'+f.name,'err'); continue; }
+        entries.push(...es);
+        App.toast('解析 '+f.name+'：'+es.length+' 条');
+      }catch(err){
+        console.error(err);
+        App.toast('导入失败 '+f.name+'：'+(err&&err.message||err),'err');
+      }
+    }
+    if(!entries.length) return;
+    if(!confirm('将从 '+files.length+' 个文件导入 '+entries.length+' 条记录，追加到记忆区末尾。继续？')) return;
+    for(const e of entries){
+      this.items.push({ id:'m'+Date.now().toString(36)+Math.random().toString(36).slice(2,7), w:e.w, d:e.d });
+    }
+    this.save();
+    this.render();
+    App.toast('已导入 '+entries.length+' 条到记忆区');
+  },
+
+  async importDocx(file){
+    if(!window.mammoth) throw new Error('Word 解析组件未加载');
+    const arrayBuffer = await file.arrayBuffer();
+    const res = await mammoth.extractRawText({arrayBuffer});
+    return res.value;
+  },
+
+  async importPdf(file){
+    if(!window.pdfjsLib) throw new Error('PDF 解析组件未加载');
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;
+    const pages = [];
+    const max = Math.min(pdf.numPages, 1000);
+    for(let i=1;i<=max;i++){
+      const page = await pdf.getPage(i);
+      const tc = await page.getTextContent();
+      const lines = []; let curY = null; let line = '';
+      const flush = ()=>{ if(line){ lines.push(line); line=''; } };
+      for(const it of tc.items){
+        if(!it.str) continue;
+        const y = it.transform ? it.transform[5] : 0;
+        if(curY===null || Math.abs(y-curY)>2){ flush(); curY=y; line=it.str; }
+        else if(it.hasEOL){ line += it.str; flush(); curY=null; }
+        else line += (line && !/[- ]$/.test(line) && !/^[- ]/.test(it.str) ? ' ' : '') + it.str;
+      }
+      flush();
+      pages.push(lines.join('\n'));
+      page.cleanup();
+      if(i%50===0) App.toast('解析 PDF 中… '+i+'/'+max+' 页');
+    }
+    return pages.join('\n\n');
+  },
 
   render(){
     const q = (document.getElementById('memSearch').value||'').trim().toLowerCase();
@@ -288,4 +357,37 @@ function groupByFamily(items){
   });
   groups.sort((a,b)=>a.first-b.first);
   return groups.map(g=>g.members);
+}
+
+/* 解析导入文本：支持 "1. word　释义"（同一行）或 "1. word" + 后续释义行 */
+function parseImportEntries(text){
+  const entries = [];
+  const lines = String(text).split(/\r?\n/);
+  let cur = null;
+  const flush = ()=>{
+    if(cur && cur.w){
+      entries.push({ w:cur.w, d:(cur.d||'').replace(/\s+$/,'') });
+    }
+    cur = null;
+  };
+  const skipRe = /^(考研英语一词汇笔记|共\s*\d+\s*条|导出时间|……|（在打印对话框)/;
+  for(const raw of lines){
+    const line = raw.replace(/\u00a0/g,' ').trim();
+    if(!line){ flush(); continue; }
+    if(skipRe.test(line)) continue;
+    const m = line.match(/^(\d{1,4})[.、．)）\s]+(.+)$/);
+    if(m && /^[A-Za-z]/.test(m[2])){
+      flush();
+      const content = m[2].trim();
+      const wm = content.match(/^([^\s　]+)[\s　]*(.*)$/);
+      cur = { w: wm ? wm[1] : content, d: wm ? wm[2] : '' };
+    }else if(cur){
+      cur.d = cur.d ? cur.d+'\n'+line : line;
+    }else{
+      const wm = line.match(/^([A-Za-z][A-Za-z'’\- ]{1,40}?)[\s　]+(.+)$/);
+      if(wm && wm[2].length>=2) cur = { w: wm[1], d: wm[2] };
+    }
+  }
+  flush();
+  return entries;
 }
