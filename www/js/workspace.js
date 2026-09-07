@@ -161,10 +161,11 @@ const WS = {
             App.toast('内容过长，已截断前 300 万字符；其余部分可用页码范围再解析');
           }
           doc.text = text; doc.html = null; doc.status = null;
+          doc.wordCount = countWords(text);
           this.renderDocList();
           this.activateDoc(doc.id);
-          App.toast(doc.spans.length
-            ? '已加载：'+f.name+'（约 '+doc.spans.length+' 个可识别单词）'
+          App.toast(doc.wordCount
+            ? '已加载：'+f.name+'（约 '+doc.wordCount+' 个可识别单词）'
             : '已加载：'+f.name+'，但未发现英文单词','err');
         }
       }catch(err){
@@ -302,6 +303,7 @@ const WS = {
     localStorage.setItem('kyw_marks_v1', JSON.stringify(store));
     if(doc && doc.pdf){ try{ doc.pdf.destroy(); }catch(e){} }
     if(this._imgObs){ this._imgObs.disconnect(); this._imgObs = null; }
+    if(this._txtObs){ this._txtObs.disconnect(); this._txtObs = null; }
     if(this.activeId===id) this.activeId = this.docs.length ? this.docs[this.docs.length-1].id : null;
     this.renderDocList();
     this.renderActive();
@@ -329,11 +331,76 @@ const WS = {
     const doc = this.currentDoc();
     if(!doc){ this.docEl.innerHTML = WS_EMPTY; return; }
     if(doc.mode==='image'){ this.renderImageDoc(doc); return; }
-    if(!doc.html) doc.html = this.buildHTML(doc.text);
-    this.docEl.innerHTML = doc.html;
-    doc.spans = [...this.docEl.querySelectorAll('.ws-word')];
-    doc.spans.forEach((s,i)=>{ if(doc.marks.has(i)) s.classList.add('marked'); });
+    this.renderTextDoc(doc);
     this.applyZoom();
+  },
+
+  /* ================= 文本模式：分块虚拟化渲染（大文件不卡死） ================= */
+  renderTextDoc(doc){
+    if(!doc.blocks){
+      doc.blocks = splitBlocks(doc.text).map(t=>({text:t}));
+      let gi = 0;
+      for(const b of doc.blocks){ b.gi0 = gi; gi += countWords(b.text); }
+      doc.wordCount = gi;
+    }
+    if(this._txtObs){ this._txtObs.disconnect(); this._txtObs = null; }
+    this.docEl.innerHTML = doc.blocks.map((b,i)=>
+      '<div class="ws-block" data-blk="'+i+'"><div class="ws-ph">'+App.esc(b.text)+'</div></div>'
+    ).join('');
+    this.applyZoom();
+    this._txtObs = new IntersectionObserver(entries=>{
+      for(const en of entries){
+        const el = en.target;
+        if(en.isIntersecting && !el.dataset.done) this.renderBlock(doc, +el.dataset.blk, el);
+      }
+      this.gcTextBlocks(doc);
+    }, {root: this.docEl, rootMargin:'1500px 0px 1500px 0px'});
+    this.docEl.querySelectorAll('.ws-block').forEach(el=>this._txtObs.observe(el));
+  },
+
+  renderBlock(doc, i, el){
+    const b = doc.blocks[i];
+    if(!b || el.dataset.done) return;
+    el.innerHTML = this.buildHTML(b.text);
+    const spans = el.querySelectorAll('.ws-word');
+    spans.forEach((s, li)=>{
+      const gi = b.gi0 + li;
+      s.dataset.gi = gi;
+      if(doc.marks.has(gi)) s.classList.add('marked');
+    });
+    el.dataset.done = '1';
+  },
+
+  gcTextBlocks(doc){
+    const rootRect = this.docEl.getBoundingClientRect();
+    const els = [...this.docEl.querySelectorAll('.ws-block')];
+    let rendered = 0;
+    const list = [];
+    for(const el of els){
+      if(!el.dataset.done) continue;
+      const r = el.getBoundingClientRect();
+      const dist = (r.bottom < rootRect.top) ? rootRect.top - r.bottom
+                 : (r.top > rootRect.bottom) ? r.top - rootRect.bottom : 0;
+      rendered++;
+      list.push({el, dist});
+    }
+    for(const it of list){ if(it.dist > 5000){ this.freeBlock(doc, it.el); rendered--; } }
+    if(rendered > 40){
+      list.sort((a,b)=>b.dist-a.dist);
+      let need = rendered - 40;
+      for(const it of list){
+        if(need <= 0) break;
+        if(!it.el.dataset.done) continue;
+        this.freeBlock(doc, it.el);
+        need--;
+      }
+    }
+  },
+
+  freeBlock(doc, el){
+    const b = doc.blocks[+el.dataset.blk];
+    el.innerHTML = '<div class="ws-ph">'+App.esc(b ? b.text : '')+'</div>';
+    delete el.dataset.done;
   },
 
   /* ================= 扫描模式：图片显示 + 区域OCR ================= */
@@ -480,9 +547,11 @@ const WS = {
       e.preventDefault();
       const pageEl = e.target.closest('.pdf-page');
       const overlayEl = e.target.closest('.pdf-overlay');
+      const blockEl = e.target.closest('.ws-block');
       const g = { kind:'word', doc, anchor:+span.dataset.i, cur:+span.dataset.i, mode:'pending',
                   startX:e.clientX, startY:e.clientY, prev:[0,0], spanEl:span, pageEl:pageEl||null,
-                  overlayEl:overlayEl||null, spans: overlayEl ? overlayEl.spans : null };
+                  overlayEl:overlayEl||null, blockEl:blockEl||null,
+                  spans: overlayEl ? overlayEl.spans : (blockEl ? [...blockEl.querySelectorAll('.ws-word')] : null) };
       this.gesture = g;
       g.timer = setTimeout(()=>{
         if(this.gesture!==g) return;
@@ -540,6 +609,7 @@ const WS = {
     const el = document.elementFromPoint(e.clientX, e.clientY);
     const span = el && el.closest ? el.closest('.ws-word') : null;
     if(span && g.overlayEl && span.closest('.pdf-overlay')!==g.overlayEl) return;
+    if(span && g.blockEl && span.closest('.ws-block')!==g.blockEl) return;
     const idx = span && span.dataset.i!=null ? +span.dataset.i : g.cur;
     if(idx!==g.cur){ g.cur = idx; this.applySel(g, g.anchor, g.cur); }
     const r = this.docEl.getBoundingClientRect();
@@ -622,15 +692,15 @@ const WS = {
       // 扫描模式识别覆盖层中的单词：标黄仅作视觉标记
       spanEl.classList.add('marked');
     }else{
-      const idx = +spanEl.dataset.i;
-      if(!doc.marks.has(idx)){
-        doc.marks.add(idx);
+      const gi = spanEl.dataset.gi!=null ? +spanEl.dataset.gi : null;
+      if(gi!=null && !doc.marks.has(gi)){
+        doc.marks.add(gi);
         spanEl.classList.add('marked');
         this.persistMarks(doc);
       }
     }
     const entry = App.dictLookup(spanEl.textContent);
-    this.showWordPopup(spanEl.textContent, entry, e, doc, pageEl ? null : +spanEl.dataset.i, spanEl, !!pageEl);
+    this.showWordPopup(spanEl.textContent, entry, e, doc, spanEl.dataset.gi!=null ? +spanEl.dataset.gi : null, spanEl, !!pageEl);
   },
 
   /* ================= 区域 OCR ================= */
@@ -735,7 +805,7 @@ const WS = {
     if(!doc.marks.size){ App.toast('当前文档没有标黄单词'); return; }
     if(!confirm('清除当前文档全部 '+doc.marks.size+' 个标黄单词？')) return;
     doc.marks.clear();
-    doc.spans.forEach(s=>s.classList.remove('marked'));
+    this.docEl.querySelectorAll('.ws-word.marked').forEach(s=>s.classList.remove('marked'));
     this.persistMarks(doc);
     App.toast('已清除当前文档的标黄');
   },
@@ -786,10 +856,10 @@ const WS = {
       if(ctx.overlay){
         marked = ctx.spanEl.classList.toggle('marked');
       }else{
-        const {doc, idx} = ctx;
-        const span = doc.spans[idx];
-        if(doc.marks.has(idx)){ doc.marks.delete(idx); span.classList.remove('marked'); marked=false; }
-        else{ doc.marks.add(idx); span.classList.add('marked'); marked=true; }
+        const {doc, gi, spanEl} = ctx;
+        if(gi==null) return;
+        if(doc.marks.has(gi)){ doc.marks.delete(gi); spanEl.classList.remove('marked'); marked=false; }
+        else{ doc.marks.add(gi); spanEl.classList.add('marked'); marked=true; }
         this.persistMarks(doc);
       }
       const b = this.defEl.querySelector('[data-act="toggleMark"]');
@@ -805,7 +875,7 @@ const WS = {
   },
 
   showWordPopup(word, entry, e, doc, idx, spanEl, overlay){
-    const marked = overlay ? spanEl.classList.contains('marked') : (doc ? doc.marks.has(idx) : false);
+    const marked = spanEl ? spanEl.classList.contains('marked') : false;
     let fam;
     if(entry){
       const clean = String(word||'').toLowerCase().replace(/[^a-z]/g,'');
@@ -818,7 +888,7 @@ const WS = {
     }else{
       fam = App.dictFamily(String(word||''), 10);
     }
-    const ctx = { text:word, entry, isPhrase:false, doc, idx, spanEl, overlay,
+    const ctx = { text:word, entry, isPhrase:false, doc, idx, gi: idx, spanEl, overlay,
                   onlineSenses:null, onlinePhon:'' };
     this.renderDef(this.popupWordHTML(word, entry, marked, fam, !!doc), ctx);
     this.bindFamActions();
@@ -949,3 +1019,35 @@ const WS = {
     return parts.join('');
   }
 };
+
+function countWords(text){ return (String(text).match(/[A-Za-z]+(?:['’\-][A-Za-z]+)*/g)||[]).length; }
+
+/* 按段落分块：每块约 1.2 万字符，超大段落硬切，块间不切词 */
+function splitBlocks(text){
+  const paras = String(text).split(/(?:\r?\n){2,}/);
+  const blocks = [];
+  let cur = '';
+  for(const p of paras){
+    cur = cur ? cur+'\n\n'+p : p;
+    if(cur.length >= 12000){ blocks.push(cur); cur = ''; }
+  }
+  if(cur) blocks.push(cur);
+  const out = [];
+  for(const b of blocks){
+    if(b.length <= 24000){ out.push(b); continue; }
+    let rest = b;
+    while(rest.length > 24000){
+      let cut = 24000;
+      const nl = rest.lastIndexOf('\n', 24000);
+      if(nl > 12000) cut = nl;
+      else{
+        const sp = rest.lastIndexOf(' ', 24000);
+        if(sp > 12000) cut = sp;
+      }
+      out.push(rest.slice(0, cut));
+      rest = rest.slice(cut);
+    }
+    if(rest) out.push(rest);
+  }
+  return out;
+}

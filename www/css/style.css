@@ -84,6 +84,8 @@ main{height:calc(100vh - 58px)}
 .ws-word.marked{background:var(--mark)}
 .ws-word.sel{background:var(--sel)}
 .ws-doc.selectable .ws-word{user-select:text;-webkit-user-select:text;cursor:text}
+.ws-block{min-height:1em}
+.ws-ph{visibility:hidden}
 .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#9aa2b4;font-size:16px;gap:8px;text-align:center;line-height:1.9}
 .empty-sub{font-size:13px;color:#b3bac9}
 .empty.small{font-size:13.5px}
