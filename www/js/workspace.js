@@ -174,6 +174,7 @@ const WS = {
         if(parsed.mode === 'image'){
           doc.mode = 'image';
           doc.pdf = parsed.pdf;
+          doc.mupdfId = parsed.mupdfId || null;
           doc.pageCount = parsed.pageCount;
           doc.range = parsed.range;
           doc.pages = [];
@@ -241,14 +242,23 @@ const WS = {
   },
 
   async parsePDF(file, opts){
-    if(!window.pdfjsLib) throw new Error('PDF 解析组件未加载');
     const buf = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;
-    const total = pdf.numPages;
+    // 桌面版：优先用 MuPDF 原生引擎（主进程桥接），浏览器回退 pdf.js
+    let mupdfInfo = null;
+    if(window.__mupdf && window.__mupdf.desktop){
+      try{ mupdfInfo = await window.__mupdf.open(new Uint8Array(buf)); }
+      catch(e){ console.warn('MuPDF 打开失败，回退 pdf.js', e); }
+    }
+    let pdf = null;
+    if(!mupdfInfo || !mupdfInfo.ok){
+      if(!window.pdfjsLib) throw new Error('PDF 解析组件未加载');
+      pdf = await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;
+    }
+    const total = (mupdfInfo && mupdfInfo.ok) ? mupdfInfo.pages : pdf.numPages;
     let start = 1, end = total;
 
     if(total > 300){
-      const ans = prompt('该 PDF 共 '+total+' 页。\n\n直接点「确定」= 打开全部；\n也可输入页码范围（如 120-180）只打开部分：','');
+      const ans = await App.prompt('页码范围', '该 PDF 共 '+total+' 页。\n\n直接点「确定」= 打开全部；\n也可输入页码范围（如 120-180）只打开部分：','');
       if(ans !== null && ans.trim()){
         const m = ans.trim().match(/^\s*(\d+)\s*(?:-|~|—|到|至)\s*(\d+)\s*$/);
         if(m){
@@ -263,7 +273,7 @@ const WS = {
     if(end > total) end = total;
     if(start > end) start = end;
     // 所有 PDF 一律按查看器模式打开（展示原本版面），区域框选识别
-    return {mode:'image', pdf, pageCount: total, range:{start, end}};
+    return {mode:'image', pdf, pageCount: total, range:{start, end}, mupdfId: (mupdfInfo && mupdfInfo.ok) ? mupdfInfo.id : null};
   },
 
   /* ================= 文档管理 ================= */
@@ -298,10 +308,10 @@ const WS = {
     this.renderActive();
   },
 
-  removeDoc(id){
+  async removeDoc(id){
     const doc = this.docs.find(d=>d.id===id);
     if(!doc) return;
-    if(doc.marks.size && !confirm('移除文档「'+doc.name+'」？该文档的标黄记录将被清除。')) return;
+    if(doc.marks.size && !(await App.confirm('移除文档「'+doc.name+'」？该文档的标黄记录将被清除。'))) return;
     this.removeDocSilent(id);
   },
 
@@ -311,6 +321,7 @@ const WS = {
     const store = this.loadAllMarks(); delete store[id];
     localStorage.setItem('kyw_marks_v1', JSON.stringify(store));
     if(doc && doc.pdf){ try{ doc.pdf.destroy(); }catch(e){} }
+    if(doc && doc.mupdfId && window.__mupdf){ try{ window.__mupdf.close(doc.mupdfId); }catch(e){} }
     if(doc && doc.photoMeta){ for(const it of doc.photoMeta){ try{ it.bmp && it.bmp.close(); }catch(e){} } doc.photoMeta = null; }
     if(this._imgObs){ this._imgObs.disconnect(); this._imgObs = null; }
     if(this._txtObs){ this._txtObs.disconnect(); this._txtObs = null; }
@@ -417,7 +428,7 @@ const WS = {
 
   /* ---------- PDF 速览缩略图：后台预生成，拖到哪显示到哪 ---------- */
   startThumbs(doc){
-    if(doc._thumbStarted || !doc.pdf || doc.mode!=='image' || doc.photoFiles || doc.stitchSegs) return;
+    if(doc._thumbStarted || (!doc.pdf && !doc.mupdfId) || doc.mode!=='image' || doc.photoFiles || doc.stitchSegs) return;
     doc._thumbStarted = true;
     doc.thumbs = doc.thumbs || {};
     const start = doc.range ? doc.range.start : 1;
@@ -430,14 +441,25 @@ const WS = {
         const p = i++;
         if(doc.thumbs[p]){ done++; continue; }
         try{
-          const page = await doc.pdf.getPage(p);
-          const vp = page.getViewport({scale: 0.42});
-          const c = document.createElement('canvas');
-          c.width = vp.width; c.height = vp.height;
-          const ctx = c.getContext('2d');
-          await page.render({canvasContext: ctx, viewport: vp}).promise;
+          let c;
+          if(doc.mupdfId && window.__mupdf){
+            const r = await window.__mupdf.render(doc.mupdfId, p, 0.42);
+            if(!r || !r.ok || !r.png) throw new Error('mupdf thumb 失败');
+            const bmp = await createImageBitmap(new Blob([r.png], {type:'image/png'}));
+            c = document.createElement('canvas');
+            c.width = bmp.width; c.height = bmp.height;
+            c.getContext('2d').drawImage(bmp, 0, 0);
+            bmp.close();
+          }else{
+            const page = await doc.pdf.getPage(p);
+            const vp = page.getViewport({scale: 0.42});
+            c = document.createElement('canvas');
+            c.width = vp.width; c.height = vp.height;
+            const ctx = c.getContext('2d');
+            await page.render({canvasContext: ctx, viewport: vp}).promise;
+            page.cleanup();
+          }
           doc.thumbs[p] = c.toDataURL('image/jpeg', 0.6);
-          page.cleanup();
           c.width = c.height = 0;
         }catch(e){ /* 单页失败忽略 */ }
         done++;
@@ -630,21 +652,34 @@ const WS = {
     if(doc.mode==='textview'){ return this.renderTextSegment(doc, pageNum, el); }
     if(doc.stitchSegs) return this.renderStitchSegment(doc, pageNum, el);
     if(doc.photoFiles) return this.renderPhoto(doc, pageNum, el);
-    if(!doc.pdf) return;
+    if(!doc.pdf && !doc.mupdfId) return;
     const st = this.pageState(doc, pageNum);
     if(st.rendered || st.rendering) return;
     st.rendering = true;
     try{
-      const page = await doc.pdf.getPage(pageNum);
-      const viewport = page.getViewport({scale: 1.5});
+      if(doc.mupdfId && window.__mupdf){
+        // 桌面版：MuPDF 主进程渲染，原生速度
+        const r = await window.__mupdf.render(doc.mupdfId, pageNum, 1.5);
+        if(!r || !r.ok || !r.png) throw new Error('MuPDF 渲染失败');
+        const bmp = await createImageBitmap(new Blob([r.png], {type:'image/png'}));
+        const canvas = el.querySelector('.page-img');
+        canvas.width = bmp.width; canvas.height = bmp.height;
+        canvas.style.aspectRatio = bmp.width + ' / ' + bmp.height;
+        canvas.getContext('2d').drawImage(bmp, 0, 0);
+        bmp.close();
+      }else{
+        const page = await doc.pdf.getPage(pageNum);
+        const viewport = page.getViewport({scale: 1.5});
+        const canvas = el.querySelector('.page-img');
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        canvas.style.aspectRatio = viewport.width + ' / ' + viewport.height;
+        const ctx = canvas.getContext('2d');
+        const task = page.render({canvasContext: ctx, viewport});
+        st.task = task;
+        await task.promise;
+        page.cleanup();
+      }
       const canvas = el.querySelector('.page-img');
-      canvas.width = viewport.width; canvas.height = viewport.height;
-      canvas.style.aspectRatio = viewport.width + ' / ' + viewport.height;
-      const ctx = canvas.getContext('2d');
-      const task = page.render({canvasContext: ctx, viewport});
-      st.task = task;
-      await task.promise;
-      page.cleanup();
       st.rendered = true; st.rendering = false; st.task = null;
       canvas.classList.add('loaded');
       canvas.classList.remove('thumbed');
@@ -1010,9 +1045,9 @@ const WS = {
     if(this._ocrWorker) return Promise.resolve(this._ocrWorker);
     if(!this._ocrWorkerPromise){
       this._ocrWorkerPromise = Tesseract.createWorker('eng+chi_sim', 1, {
-        workerPath: '/libs/tess/worker.min.js',
-        corePath: '/libs/tess/tesseract-core-simd.wasm.js',
-        langPath: '/tessdata/',
+        workerPath: location.origin + '/libs/tess/worker.min.js',
+        corePath: location.origin + '/libs/tess/tesseract-core-simd.wasm.js',
+        langPath: location.origin + '/tessdata/',
         gzip: false
       }).then(w=>{ this._ocrWorker = w; return w; })
         .catch(e=>{ this._ocrWorkerPromise = null; throw new Error('OCR 引擎初始化失败：'+(e&&e.message||e)); });
@@ -1101,11 +1136,11 @@ const WS = {
     localStorage.setItem('kyw_marks_v1', JSON.stringify(store));
   },
 
-  clearMarks(){
+  async clearMarks(){
     const doc = this.currentDoc();
     if(!doc || doc.mode==='image'){ App.toast(doc && doc.mode==='image' ? '扫描模式下无持久标黄，可直接关闭识别框' : '当前没有文档'); return; }
     if(!doc.marks.size){ App.toast('当前文档没有标黄单词'); return; }
-    if(!confirm('清除当前文档全部 '+doc.marks.size+' 个标黄单词？')) return;
+    if(!(await App.confirm('清除当前文档全部 '+doc.marks.size+' 个标黄单词？'))) return;
     doc.marks.clear();
     this.docEl.querySelectorAll('.ws-word.marked').forEach(s=>s.classList.remove('marked'));
     this.persistMarks(doc);

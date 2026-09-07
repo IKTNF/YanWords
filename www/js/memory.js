@@ -69,9 +69,9 @@ const MEM = {
     if(it) App.toast('已删除「'+it.w+'」');
   },
 
-  clearAll(){
+  async clearAll(){
     if(!this.items.length){ App.toast('记忆区已经是空的'); return; }
-    if(!confirm('确定清空记忆区全部 '+this.items.length+' 条记录？此操作不可恢复。')) return;
+    if(!(await App.confirm('确定清空记忆区全部 '+this.items.length+' 条记录？此操作不可恢复。'))) return;
     this.items = [];
     this.save();
     this.render();
@@ -121,7 +121,7 @@ const MEM = {
       }
     }
     if(!entries.length) return;
-    if(!confirm('将从 '+files.length+' 个文件导入 '+entries.length+' 条记录，追加到记忆区末尾。继续？')) return;
+    if(!(await App.confirm('将从 '+files.length+' 个文件导入 '+entries.length+' 条记录，追加到记忆区末尾。继续？'))) return;
     for(const e of entries){
       this.items.push({ id:'m'+Date.now().toString(36)+Math.random().toString(36).slice(2,7), w:e.w, d:e.d });
     }

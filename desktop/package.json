@@ -1,0 +1,30 @@
+{
+  "name": "yancwords-desktop",
+  "version": "1.1.1",
+  "description": "研词助手 · 考研英语一词汇工作台（桌面版）",
+  "main": "main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "prepack-app": "node scripts/prepack.js",
+    "dist": "npm run prepack-app && electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.iktf.yancwords",
+    "productName": "研词助手",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "preload.js", "approot/**/*"],
+    "win": {
+      "target": ["portable"],
+      "artifactName": "YanCi-KaoYan-Vocab-Workbench-${version}-portable.${ext}"
+    },
+    "asarUnpack": ["approot/www/tessdata/**/*", "approot/www/fonts/**/*"]
+  },
+  "dependencies": {
+    "mupdf": "^1.28.1"
+  },
+  "devDependencies": {
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3"
+  }
+}

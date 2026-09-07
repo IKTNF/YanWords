@@ -193,6 +193,47 @@ const App = {
     }
   },
 
+  /* ---------- 弹窗封装：浏览器用原生 confirm/prompt，桌面版(Electron)用应用内模态框 ---------- */
+  confirm(msg, title){
+    if(!(window.__mupdf && window.__mupdf.desktop)) return Promise.resolve(window.confirm(msg));
+    return new Promise(res=>{
+      const m = document.createElement('div');
+      m.className = 'modal-backdrop';
+      m.innerHTML = '<div class="modal-card" style="width:min(440px,92vw)"><div class="modal-head">'+(title||'确认')+'</div>'
+        + '<div class="modal-body"><div style="white-space:pre-wrap;line-height:1.7">'+this.esc(msg)+'</div>'
+        + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
+        + '<button class="btn" data-a="0">取消</button><button class="btn btn-primary" data-a="1">确定</button></div></div></div>';
+      document.body.appendChild(m);
+      const done = (v)=>{ m.remove(); res(v); };
+      m.addEventListener('mousedown', e=>{ if(e.target===m) done(false); });
+      m.querySelectorAll('[data-a]').forEach(b=>b.addEventListener('click', ()=>done(b.dataset.a==='1')));
+      m.querySelector('[data-a="1"]').focus();
+    });
+  },
+
+  prompt(title, msg, def){
+    if(!(window.__mupdf && window.__mupdf.desktop)) return Promise.resolve(window.prompt(msg, def||''));
+    return new Promise(res=>{
+      const m = document.createElement('div');
+      m.className = 'modal-backdrop';
+      m.innerHTML = '<div class="modal-card" style="width:min(440px,92vw)"><div class="modal-head">'+(title||'输入')+'</div>'
+        + '<div class="modal-body"><div style="white-space:pre-wrap;line-height:1.7;margin-bottom:10px">'+this.esc(msg)+'</div>'
+        + '<input type="text" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none" value="'+this.esc(def||'')+'">'
+        + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
+        + '<button class="btn" data-a="0">取消</button><button class="btn btn-primary" data-a="1">确定</button></div></div></div>';
+      document.body.appendChild(m);
+      const input = m.querySelector('input');
+      const done = (v)=>{ m.remove(); res(v); };
+      m.addEventListener('mousedown', e=>{ if(e.target===m) done(null); });
+      m.querySelectorAll('[data-a]').forEach(b=>b.addEventListener('click', ()=>done(b.dataset.a==='1' ? (input.value||'') : null)));
+      input.addEventListener('keydown', e=>{
+        if(e.key==='Enter') done(input.value||'');
+        if(e.key==='Escape') done(null);
+      });
+      input.focus();
+    });
+  },
+
   /* ---------- 词性判断与词形变化 ---------- */
   posOfText(text){
     const t = String(text||'').toLowerCase();
