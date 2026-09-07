@@ -19,13 +19,13 @@
   <nav class="tabs">
     <button class="tab active" data-tab="workspace">工作区</button>
     <button class="tab" data-tab="memory">记忆区<span class="badge" id="memCount">0</span></button>
-    <button class="tab" data-tab="dict">翻译</button>
+    <button class="tab" data-tab="dict">词典</button>
   </nav>
   <div class="top-right">
     <span class="src-label">词库来源</span>
-    <select id="srcSelect" title="选择词典数据来源（翻译区查词与工作区在线翻译使用）">
+    <select id="srcSelect" title="选择词典数据来源">
       <option value="offline">内置考研词库（离线）</option>
-      <option value="youdao">在线翻译/词典（在线）</option>
+      <option value="youdao">有道词典（在线）</option>
     </select>
   </div>
 </header>
@@ -114,14 +114,14 @@
     </div>
   </section>
 
-  <!-- ==================== 翻译区 ==================== -->
+  <!-- ==================== 词典 ==================== -->
   <section class="panel" id="panel-dict">
     <div class="dict-wrap">
       <div class="dict-search card">
-        <input type="text" id="dictInput" placeholder="单词查词（economy）/ 长段英文或中文自动翻译…">
-        <button class="btn btn-primary" id="btnSearch">🔍 查询 / 翻译</button>
+        <input type="text" id="dictInput" placeholder="输入英文单词（如 economy）或中文（如 经济）…">
+        <button class="btn btn-primary" id="btnSearch">🔍 查询</button>
       </div>
-      <div class="dict-hint muted">支持 单词查词（考研释义 + 词群 + 词形变化）/ 长段中英互译（在线翻译，离线自动切换逐词对照）</div>
+      <div class="dict-hint muted">支持 英→中 / 中→英 · 内置词库含考研大纲 5530 词（含词频）+ 红宝书补充词 · 在线词典为有道（自动兜底必应）</div>
       <div id="dictResults" class="dict-results"></div>
     </div>
   </section>

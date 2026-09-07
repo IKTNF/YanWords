@@ -1078,7 +1078,7 @@ const WS = {
       }else{
         if(ctx.entry) meaning = ctx.entry.defs.join('\n');
         if(ctx.onlineSenses && ctx.onlineSenses.length){
-          meaning = meaning ? meaning+'\n【翻译】'+ctx.onlineSenses.join('\n') : ctx.onlineSenses.join('\n');
+          meaning = meaning ? meaning+'\n【在线】'+ctx.onlineSenses.join('\n') : ctx.onlineSenses.join('\n');
         }
       }
       if(!meaning) meaning = '（无释义，可在记忆区自行编辑补充）';
@@ -1128,7 +1128,7 @@ const WS = {
                   onlineSenses:null, onlinePhon:'' };
     this.renderDef(this.popupWordHTML(word, entry, marked, fam, !!doc), ctx);
     this.bindFamActions();
-    if(App.state.source==='youdao') this.fillTranslate(ctx, word);
+    if(App.state.source==='youdao') this.fillOnline(ctx, word);
   },
 
   /* 词群成员点击 → 直接切换查看该词 */
@@ -1139,7 +1139,7 @@ const WS = {
                   onlineSenses:null, onlinePhon:'' };
     this.renderDef(this.popupWordHTML(w, entry, false, fam, false), ctx);
     this.bindFamActions();
-    if(App.state.source==='youdao') this.fillTranslate(ctx, w);
+    if(App.state.source==='youdao') this.fillOnline(ctx, w);
   },
 
   bindFamActions(){
@@ -1164,21 +1164,22 @@ const WS = {
     const words = phrase.split(/\s+/).filter(Boolean);
     const ctx = { text:phrase, isPhrase:true, words, onlineSenses:null, onlinePhon:'' };
     this.renderDef(this.popupPhraseHTML(phrase, words), ctx);
-    if(App.state.source==='youdao') this.fillTranslate(ctx, phrase);
+    if(App.state.source==='youdao') this.fillOnline(ctx, phrase);
   },
 
-  fillTranslate(ctx, q){
+  fillOnline(ctx, q){
     const sec = this.defEl.querySelector('#onlineSec');
     const title = this.defEl.querySelector('#onlineTitle');
     if(!sec) return;
     if(title) title.style.display = 'block';
-    sec.innerHTML = '<span class="spin"></span>翻译中…';
-    App.translate(q, /[\u4e00-\u9fff]/.test(q) ? 'en' : 'zh-CN').then(res=>{
+    sec.innerHTML = '<span class="spin"></span>查询在线词典…';
+    App.fetchOnline(q).then(res=>{
       if(this.popupCtx!==ctx) return;
-      if(title) title.textContent = res.mode==='online' ? '在线翻译' : '对照翻译（离线）';
-      ctx.onlineSenses = res.text ? [res.text] : [];
-      if(res.error && !res.text){ sec.innerHTML = '<div class="note-line">翻译失败：'+App.esc(res.error)+'</div>'; return; }
-      sec.innerHTML = '<div class="def-line">'+App.esc(res.text)+'</div>';
+      ctx.onlineSenses = res.senses; ctx.onlinePhon = res.phonetic;
+      if(title) title.textContent = '在线释义 · '+(res.source==='bing' ? '必应' : '有道');
+      if(res.error){ sec.innerHTML = '<div class="note-line">在线查询失败：'+App.esc(res.error)+'</div>'; return; }
+      if(res.senses.length){ sec.innerHTML = res.senses.map(s=>'<div class="def-line">'+App.esc(s)+'</div>').join(''); }
+      else sec.innerHTML = '<div class="note-line">在线词典无结果</div>';
     });
   },
 
@@ -1210,7 +1211,7 @@ const WS = {
               + '</div>';
           }).join('') + '</div>';
     }
-    body += '<div class="popup-section-title" id="onlineTitle"'+(App.state.source!=='youdao'?' style="display:none"':'')+'>在线翻译</div><div id="onlineSec"></div>';
+    body += '<div class="popup-section-title" id="onlineTitle"'+(App.state.source!=='youdao'?' style="display:none"':'')+'>在线释义</div><div id="onlineSec"></div>';
     return `<button class="popup-close" data-act="close" title="关闭">✕</button>
     <div class="popup-head"><span class="popup-word">${App.esc(word)}</span>${chips.join('')}</div>
     <div class="popup-body">${body}</div>
@@ -1231,7 +1232,7 @@ const WS = {
     <div class="popup-body">
       <div class="popup-section-title" style="border-top:0;margin-top:0;padding-top:0">逐词释义</div>
       ${breakdown}
-      <div class="popup-section-title" id="onlineTitle"${App.state.source!=='youdao'?' style="display:none"':''}>在线翻译</div>
+      <div class="popup-section-title" id="onlineTitle"${App.state.source!=='youdao'?' style="display:none"':''}>在线释义</div>
       <div id="onlineSec"></div>
     </div>
     <div class="popup-foot">
