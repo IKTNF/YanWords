@@ -77,7 +77,7 @@ main{height:calc(100vh - 58px)}
 .col-toggle{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:22px;height:38px;border:1px solid var(--border);background:#fff;border-radius:11px;cursor:pointer;color:var(--muted);font-size:13px;line-height:1;padding:0;box-shadow:0 1px 6px rgba(30,41,80,.14)}
 .col-toggle:hover{color:var(--accent);border-color:var(--accent)}
 .hidden{display:none !important}
-.ws-doc{flex:1;overflow:auto;padding:36px 48px;font-size:17px;line-height:2.05;letter-spacing:.2px;font-family:Georgia,'Times New Roman','Segoe UI','Microsoft YaHei',serif;color:#2a2f3a;transition:outline .1s}
+.ws-doc{flex:1;overflow:auto;padding:36px 48px;font-size:17px;line-height:2.05;letter-spacing:.2px;font-family:Georgia,'Times New Roman','Segoe UI','Microsoft YaHei',serif;color:#2a2f3a;transition:outline .1s;white-space:pre-wrap}
 .ws-doc.dragover{outline:3px dashed var(--accent);outline-offset:-12px;background:#fafbff}
 .ws-word{cursor:pointer;border-radius:4px;padding:0 2px;user-select:none;-webkit-user-select:none;transition:background .12s}
 .ws-word:hover{background:#eef2ff}

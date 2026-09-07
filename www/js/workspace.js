@@ -7,7 +7,8 @@ function djb2(s){ let h=5381; for(let i=0;i<s.length;i++) h=((h<<5)+h+s.charCode
 const WS = {
   docs: [], activeId: null, gesture: null,
   defEl: null, popupCtx: null,
-  _imgObs: null,
+  _imgObs: null, _txtObs: null,
+  _renderQueue: [], _activeRenders: 0,
   _ocrWorker: null, _ocrWorkerPromise: null,
   _hintShown: false,
 
@@ -22,6 +23,19 @@ const WS = {
     drop.addEventListener('dragover', e=>{ e.preventDefault(); drop.classList.add('dragover'); });
     drop.addEventListener('dragleave', ()=>drop.classList.remove('dragover'));
     drop.addEventListener('drop', e=>{ e.preventDefault(); drop.classList.remove('dragover'); this.handleFiles([...e.dataTransfer.files]); });
+    // 滚动时回收远处页面/文本块（防止快速拖动滚动条时渲染堆积）
+    let scrollPending = false;
+    drop.addEventListener('scroll', ()=>{
+      if(scrollPending) return;
+      scrollPending = true;
+      requestAnimationFrame(()=>{
+        scrollPending = false;
+        const d = this.currentDoc();
+        if(!d) return;
+        if(d.mode==='image') this.gcPageImages(d);
+        else this.gcTextBlocks(d);
+      });
+    });
     // 手势
     drop.addEventListener('mousedown', this.onDown.bind(this));
     window.addEventListener('mousemove', this.onMove.bind(this));
@@ -33,6 +47,14 @@ const WS = {
       App.state.wsZoom = +e.target.value;
       document.getElementById('wsZoomVal').textContent = e.target.value+'px';
       this.applyZoom(); App.save();
+    });
+    // 多图拼接间距
+    document.getElementById('photoGap').addEventListener('input', e=>{
+      const doc = this.currentDoc();
+      if(!doc || !doc.photoFiles) return;
+      doc.photoGap = +e.target.value;
+      document.getElementById('photoGapVal').textContent = e.target.value+'px';
+      this.renderActive();
     });
     // 左右侧栏：拖动调宽 / 点击箭头隐藏，内容随宽度缩放
     this.leftEl = document.getElementById('wsSide');
@@ -193,8 +215,16 @@ const WS = {
     if(!window.mammoth) throw new Error('Word 解析组件未加载');
     try{
       const arrayBuffer = await file.arrayBuffer();
-      const res = await mammoth.extractRawText({arrayBuffer});
-      return res.value;
+      // 用 HTML 转换保留段落/列表/表格等块级结构，再还原为带换行的文本（不破坏原排版）
+      const res = await mammoth.convertToHtml({arrayBuffer});
+      const dom = new DOMParser().parseFromString(res.value, 'text/html');
+      dom.querySelectorAll('p,li,tr,br,h1,h2,h3,h4,h5,h6').forEach(el=>{
+        el.insertAdjacentText('afterend', '\n');
+      });
+      dom.querySelectorAll('td,th').forEach(el=>{
+        el.insertAdjacentText('beforeend', '\t');
+      });
+      return (dom.body ? dom.body.textContent : '').replace(/\n{3,}/g, '\n\n').replace(/\t+/g, '\t').trim();
     }catch(e){ throw new Error('无法解析（旧版 .doc 请先用 WPS/Word 另存为 .docx）'); }
   },
 
@@ -302,6 +332,7 @@ const WS = {
     const store = this.loadAllMarks(); delete store[id];
     localStorage.setItem('kyw_marks_v1', JSON.stringify(store));
     if(doc && doc.pdf){ try{ doc.pdf.destroy(); }catch(e){} }
+    if(doc && doc.photoMeta){ for(const it of doc.photoMeta){ try{ it.bmp && it.bmp.close(); }catch(e){} } doc.photoMeta = null; }
     if(this._imgObs){ this._imgObs.disconnect(); this._imgObs = null; }
     if(this._txtObs){ this._txtObs.disconnect(); this._txtObs = null; }
     if(this.activeId===id) this.activeId = this.docs.length ? this.docs[this.docs.length-1].id : null;
@@ -329,6 +360,8 @@ const WS = {
 
   renderActive(){
     const doc = this.currentDoc();
+    const gapRow = document.getElementById('photoGapRow');
+    if(gapRow) gapRow.style.display = (doc && doc.mode==='image' && doc.photoFiles && doc.photoFiles.length>1) ? '' : 'none';
     if(!doc){ this.docEl.innerHTML = WS_EMPTY; return; }
     if(doc.mode==='image'){ this.renderImageDoc(doc); return; }
     this.renderTextDoc(doc);
@@ -409,6 +442,12 @@ const WS = {
     const end = doc.range ? doc.range.end : doc.pageCount;
     const isPhoto = !!doc.photoFiles;
     doc.pageRange = [start, end];
+    doc.pages = [];   // 重建 DOM，重置页面渲染状态
+    // 多图：按上传顺序拼接成一张长图（间距可调）
+    if(doc.photoFiles && doc.photoFiles.length > 1){
+      this.renderStitchDoc(doc);
+      return;
+    }
     const html = [];
     for(let i=start;i<=end;i++){
       html.push('<div class="pdf-page" data-page="'+i+'">'
@@ -424,14 +463,14 @@ const WS = {
     if('IntersectionObserver' in window){
       if(this._imgObs) this._imgObs.disconnect();
       this._imgObs = new IntersectionObserver(entries=>{
-        let changed = false;
         for(const en of entries){
           if(en.isIntersecting){
             const el = en.target;
-            if(!this.pageState(doc, +el.dataset.page).rendered){ this.renderPageImage(doc, +el.dataset.page, el); changed = true; }
+            const st = this.pageState(doc, +el.dataset.page);
+            if(!st.rendered && !st.rendering) this.enqueuePageRender(doc, +el.dataset.page, el);
           }
         }
-        if(changed) this.gcPageImages(doc);
+        this.gcPageImages(doc);
       }, {root: this.docEl, rootMargin: '900px 0px 900px 0px'});
       this.docEl.querySelectorAll('.pdf-page').forEach(el=>this._imgObs.observe(el));
     }else{
@@ -439,13 +478,36 @@ const WS = {
     }
   },
 
+  /* 页面渲染队列：最多 3 页并发，跳过的任务直接丢弃 */
+  enqueuePageRender(doc, pageNum, el){
+    this._renderQueue.push({doc, pageNum, el});
+    this.pumpRenderQueue();
+  },
+
+  pumpRenderQueue(){
+    if(this._activeRenders >= 3 || !this._renderQueue.length) return;
+    const job = this._renderQueue.shift();
+    if(!job.el.isConnected || this.currentDoc()!==job.doc){ this.pumpRenderQueue(); return; }
+    const rootRect = this.docEl.getBoundingClientRect();
+    const r = job.el.getBoundingClientRect();
+    const dist = (r.bottom < rootRect.top) ? rootRect.top - r.bottom
+               : (r.top > rootRect.bottom) ? r.top - rootRect.bottom : 0;
+    if(dist > 2500){ this.pumpRenderQueue(); return; }
+    this._activeRenders++;
+    this.renderPageImage(job.doc, job.pageNum, job.el).finally(()=>{
+      this._activeRenders--;
+      this.pumpRenderQueue();
+    });
+  },
+
   pageState(doc, pageNum){
     if(!doc.pages) doc.pages = [];
-    if(!doc.pages[pageNum]) doc.pages[pageNum] = {rendered:false, rendering:false, overlays:[], ocrBusy:false};
+    if(!doc.pages[pageNum]) doc.pages[pageNum] = {rendered:false, rendering:false, overlays:[], ocrBusy:false, task:null};
     return doc.pages[pageNum];
   },
 
   async renderPageImage(doc, pageNum, el){
+    if(doc.stitchSegs) return this.renderStitchSegment(doc, pageNum, el);
     if(doc.photoFiles) return this.renderPhoto(doc, pageNum, el);
     if(!doc.pdf) return;
     const st = this.pageState(doc, pageNum);
@@ -458,21 +520,22 @@ const WS = {
       canvas.width = viewport.width; canvas.height = viewport.height;
       canvas.style.aspectRatio = viewport.width + ' / ' + viewport.height;
       const ctx = canvas.getContext('2d');
-      await page.render({canvasContext: ctx, viewport}).promise;
+      const task = page.render({canvasContext: ctx, viewport});
+      st.task = task;
+      await task.promise;
       page.cleanup();
-      st.rendered = true; st.rendering = false;
+      st.rendered = true; st.rendering = false; st.task = null;
       canvas.classList.add('loaded');
     }catch(e){
-      console.error('页面渲染失败', pageNum, e);
-      st.rendering = false;
+      if(!(e && e.name==='RenderingCancelledException')) console.error('页面渲染失败', pageNum, e);
+      st.rendering = false; st.task = null;
     }
   },
 
   async renderPhoto(doc, pageNum, el){
     const st = this.pageState(doc, pageNum);
     if(st.rendered || st.rendering) return;
-    st.rendering = true;
-    try{
+    st.rendering = true;    try{
       const f = doc.photoFiles[pageNum-1];
       const url = URL.createObjectURL(f);
       const img = await new Promise((res, rej)=>{
@@ -498,31 +561,133 @@ const WS = {
     }
   },
 
+  /* ---------- 多图拼接：按上传顺序拼成长图，间距可调 ---------- */
+  async ensurePhotoMeta(doc){
+    if(doc.photoMeta) return;
+    doc.photoMeta = [];
+    for(const f of doc.photoFiles){
+      try{
+        const bmp = await createImageBitmap(f);
+        doc.photoMeta.push({bmp, w:bmp.width, h:bmp.height});
+      }catch(e){
+        console.error('图片解码失败', f.name, e);
+      }
+    }
+  },
+
+  async renderStitchDoc(doc){
+    if(!doc.photoMeta){ await this.ensurePhotoMeta(doc); }
+    if(doc !== this.currentDoc()) return;
+    const gap = doc.photoGap!=null ? doc.photoGap : 8;
+    const gp = document.getElementById('photoGap');
+    if(gp && +gp.value !== gap) gp.value = gap;
+    const gv = document.getElementById('photoGapVal');
+    if(gv) gv.textContent = gap+'px';
+    const W = 1600;
+    const gapC = Math.round(gap * W / 760);
+    const segs = [];
+    let seg = {h:0, items:[]};
+    for(const it of doc.photoMeta){
+      const h = Math.round(W * it.h / it.w);
+      const add = (seg.items.length ? gapC : 0) + h;
+      if(seg.h + add > 8200 && seg.items.length){
+        segs.push(seg);
+        seg = {h:0, items:[]};
+      }
+      seg.h += add;
+      seg.items.push(it);
+    }
+    if(seg.items.length) segs.push(seg);
+    doc.stitchSegs = segs;
+    doc.pages = [];   // 重建 DOM，重置页面渲染状态
+    if(this._imgObs){ this._imgObs.disconnect(); this._imgObs = null; }
+    this.docEl.innerHTML = segs.map((s,i)=>
+      '<div class="pdf-page" data-page="'+(i+1)+'">'
+      + '<div class="page-canvas-wrap">'
+      + '<canvas class="page-img" style="aspect-ratio:'+W+'/'+s.h+'"></canvas>'
+      + '<div class="page-overlays"></div>'
+      + '</div>'
+      + '<div class="page-label">拼接图 '+(i+1)+'/'+segs.length+' · 按住左键拖拽框选区域识别文字</div>'
+      + '</div>').join('');
+    this.applyZoom();
+    if('IntersectionObserver' in window){
+      this._imgObs = new IntersectionObserver(entries=>{
+        for(const en of entries){
+          if(en.isIntersecting){
+            const el = en.target;
+            const st = this.pageState(doc, +el.dataset.page);
+            if(!st.rendered && !st.rendering) this.enqueuePageRender(doc, +el.dataset.page, el);
+          }
+        }
+        this.gcPageImages(doc);
+      }, {root: this.docEl, rootMargin: '900px 0px 900px 0px'});
+      this.docEl.querySelectorAll('.pdf-page').forEach(el=>this._imgObs.observe(el));
+    }
+  },
+
+  async renderStitchSegment(doc, segIdx, el){
+    const seg = doc.stitchSegs[segIdx-1];
+    if(!seg) return;
+    const st = this.pageState(doc, segIdx);
+    if(st.rendered || st.rendering) return;
+    st.rendering = true;
+    try{
+      const W = 1600;
+      const gap = doc.photoGap!=null ? doc.photoGap : 8;
+      const gapC = Math.round(gap * W / 760);
+      const canvas = el.querySelector('.page-img');
+      canvas.width = W; canvas.height = seg.h;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, W, seg.h);
+      let y = 0;
+      seg.items.forEach((it, i)=>{
+        if(i > 0) y += gapC;
+        const h = Math.round(W * it.h / it.w);
+        ctx.drawImage(it.bmp, 0, y, W, h);
+        y += h;
+      });
+      canvas.style.aspectRatio = W + ' / ' + seg.h;
+      st.rendered = true; st.rendering = false;
+      canvas.classList.add('loaded');
+    }catch(e){
+      console.error('拼接图渲染失败', segIdx, e);
+      st.rendering = false;
+    }
+  },
+
   gcPageImages(doc){
     const rootRect = this.docEl.getBoundingClientRect();
     const pages = [...this.docEl.querySelectorAll('.pdf-page')];
+    const list = [];
     let rendered = 0;
-    const renderedList = [];
     for(const el of pages){
       const st = this.pageState(doc, +el.dataset.page);
-      if(!st.rendered) continue;
+      if(!st.rendered && !st.rendering) continue;
       const r = el.getBoundingClientRect();
       const dist = (r.bottom < rootRect.top) ? rootRect.top - r.bottom
                  : (r.top > rootRect.bottom) ? r.top - rootRect.bottom : 0;
-      rendered++;
-      renderedList.push({el, st, dist});
+      if(st.rendering) list.push({el, st, dist, rendering:true});
+      else{ rendered++; list.push({el, st, dist, rendering:false}); }
     }
-    // 距视口超过 2500px 的直接释放
-    for(const it of renderedList){
-      if(it.dist > 2500){ this.freePageCanvas(it.el, it.st); rendered--; }
+    // 远处页：渲染中的取消任务，已渲染的释放画布
+    for(const it of list){
+      if(it.dist > 2500){
+        if(it.rendering){
+          if(it.st.task){ try{ it.st.task.cancel(); }catch(e){} it.st.task = null; }
+          it.st.rendering = false;
+        }else{
+          this.freePageCanvas(it.el, it.st);
+          rendered--;
+        }
+      }
     }
     // 超过 12 页时释放最远的
     if(rendered > 12){
-      renderedList.sort((a,b)=>b.dist-a.dist);
+      const rend = list.filter(x=>!x.rendering && x.st.rendered).sort((a,b)=>b.dist-a.dist);
       let need = rendered - 12;
-      for(const it of renderedList){
+      for(const it of rend){
         if(need <= 0) break;
-        if(!it.st.rendered) continue;
         this.freePageCanvas(it.el, it.st);
         need--;
       }
@@ -530,6 +695,7 @@ const WS = {
   },
 
   freePageCanvas(el, st){
+    if(st.task){ try{ st.task.cancel(); }catch(e){} st.task = null; }
     const canvas = el.querySelector('.page-img');
     if(canvas){ canvas.width = canvas.height = 0; canvas.classList.remove('loaded'); }
     st.rendered = false;
