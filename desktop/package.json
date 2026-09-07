@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "prepack-app": "node scripts/prepack.js",
-    "dist": "npm run prepack-app && electron-builder --win portable"
+    "dist": "npm run prepack-app && electron-builder --win"
   },
   "build": {
     "appId": "com.iktf.yancwords",
@@ -15,7 +15,20 @@
     "directories": { "output": "dist" },
     "files": ["main.js", "preload.js", "approot/**/*"],
     "win": {
-      "target": ["portable"],
+      "target": ["nsis", "portable"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "研词助手",
+      "artifactName": "YanCi-KaoYan-Vocab-Workbench-${version}-setup.${ext}",
+      "installerLanguages": ["zh_CN", "en_US"],
+      "language": "2052",
+      "multiLanguageInstaller": true
+    },
+    "portable": {
       "artifactName": "YanCi-KaoYan-Vocab-Workbench-${version}-portable.${ext}"
     },
     "asarUnpack": ["approot/www/tessdata/**/*", "approot/www/fonts/**/*"]
