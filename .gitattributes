@@ -7,8 +7,6 @@
 *.html text eol=lf
 *.md text eol=lf
 *.json text eol=lf
-*.py text eol=lf
-*.bat text eol=crlf
 
 # 二进制不转换
 *.otf binary
@@ -21,3 +19,4 @@
 *.zip binary
 *.pdf binary
 *.docx binary
+*.exe binary

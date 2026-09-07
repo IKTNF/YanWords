@@ -11,7 +11,11 @@ let nextId = 1;
 
 /* ---- 启动本地服务（复用 server.js，serve www 静态文件与在线词典代理） ---- */
 function startServer(){
-  const serverPath = path.join(app.getAppPath(), 'approot', 'server.js');
+  const appPath = app.getAppPath();
+  // 优先打包后的 approot/server.js；源码开发模式（未 prepack）直接复用根目录 server.js
+  const serverPath = fs.existsSync(path.join(appPath, 'approot', 'server.js'))
+    ? path.join(appPath, 'approot', 'server.js')
+    : path.join(appPath, 'server.js');
   try{
     server = require(serverPath);
   }catch(e){

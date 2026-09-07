@@ -1,8 +1,8 @@
-// 打包前把 www 与 server 复制进 app 目录
+// 打包前把 www 与 server 复制进 app 目录（发布时打进 asar）
 const fs = require('fs');
 const path = require('path');
-const ROOT = path.resolve(__dirname, '..', '..');
-const OUT = path.join(__dirname, '..', 'approot');
+const ROOT = path.resolve(__dirname, '..');
+const OUT = path.join(ROOT, 'approot');
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
 function cp(src, dst){
@@ -15,7 +15,7 @@ function cp(src, dst){
   }
 }
 cp(path.join(ROOT, 'www'), path.join(OUT, 'www'));
-for(const f of ['server.js', 'server.py', '启动.bat', '使用说明.md', '测试资料.txt', 'README.md', 'LICENSE']){
+for(const f of ['server.js', '使用说明.md', 'README.md', 'LICENSE']){
   const s = path.join(ROOT, f);
   if(fs.existsSync(s)) fs.copyFileSync(s, path.join(OUT, f));
 }

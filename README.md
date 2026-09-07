@@ -27,10 +27,11 @@
 ```bash
 git clone https://github.com/IKTNF/YanWords.git
 cd YanWords
+npm install
+npm start        # 需要 Node.js 18+
 ```
 
-- **桌面版**：`cd desktop && npm install && npm start`
-- **浏览器版**：需要本机已装 Node.js 18+（或 Python 3.8+），双击 `启动.bat`，浏览器自动打开 `http://127.0.0.1:8765/`
+> `npm start` 直接以桌面窗口运行；发布构建使用 `npm run dist`（产出安装版 + 便携版）。
 
 ---
 
@@ -67,12 +68,12 @@ cd YanWords
 
 ## 🔧 使用说明与注意事项
 
-- **数据存储**：记忆区与设置保存在应用本地（桌面版：Electron 用户数据目录；浏览器版：localStorage），仅本机。重装/换电脑会丢失记录——重要内容请先「导出 Word / PDF」备份，或使用记忆区「导入」功能迁移
+- **数据存储**：记忆区与设置保存在应用本地（Electron 用户数据目录），仅本机。重装/换电脑会丢失记录——重要内容请先「导出 Word / PDF」备份，或使用记忆区「导入」功能迁移
 - **安全软件**：程序为本地应用，首次运行如遇 360 / Defender 提示，选择**允许**。应用只在 `127.0.0.1:8765` 监听本地回环地址，不联网上传你的任何数据
 - **联网说明**：词库、OCR、字体全部内置，**断网可正常使用全部核心功能**；仅「在线词典」一项需要联网
 - **识别效果**：框选区域越贴合文字、版面越清晰识别越准；放大页面后再框选小字效果更好。识别在**本地**进行（无网络传输）
 - **旧版 .doc 解析失败**：先用 WPS / Word 另存为 `.docx` 再上传
-- **端口 8765 被占用**（仅源码运行模式会遇到）：关闭占用该端口的程序，或修改 `server.js` 与 `启动.bat` 中的端口号
+- **端口 8765 被占用**（仅源码运行模式会遇到）：关闭占用该端口的程序，或修改 `server.js` 中的端口号
 
 ## 🚀 使用速览
 
@@ -87,16 +88,13 @@ cd YanWords
 
 ```
 YanWords/
-├── desktop/              # 桌面版：Electron 外壳 + MuPDF 原生渲染桥接 + 打包脚本
-│   ├── main.js           # 主进程（本地服务 + PDF 按路径解析渲染）
-│   ├── preload.js        # 预加载（文件路径 / 渲染 IPC 桥接）
-│   ├── scripts/prepack.js# 打包前把 www 与 server 复制进应用目录
-│   └── package.json      # electron-builder 配置（NSIS 安装版 + 便携版）
-├── server.js             # 本地服务（Node 版）：静态文件 + 在线词典多源代理
-├── server.py             # 本地服务（Python 备用版）
-├── 启动.bat              # 浏览器版一键启动
-├── 使用说明.md            # 详细中文说明
-└── www/                  # 前端 + 全部内置资源
+├── main.js               # Electron 主进程：内嵌本地服务 + MuPDF 按路径解析渲染桥接
+├── preload.js            # 预加载：文件磁盘路径 / PDF 渲染 IPC
+├── package.json          # electron-builder 配置（NSIS 安装版 + 便携版）
+├── scripts/prepack.js    # 打包前把 www 与 server 复制进 approot（打进 asar）
+├── server.js             # 内嵌本地服务：静态文件 + 在线词典多源代理
+├── 使用说明.md            # 详细中文说明（随应用内置）
+└── www/                  # 前端 UI + 全部内置资源
     ├── index.html
     ├── css/style.css
     ├── js/               # app / workspace / memory / dictionary / export / wordlist(内置词库)
