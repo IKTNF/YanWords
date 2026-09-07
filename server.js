@@ -81,6 +81,46 @@ async function bingParsed(q){
   return { source:'bing', phonetic, senses };
 }
 
+/* ---- 翻译：有道 fanyi（sign）/ QQ 翻译 ---- */
+async function youdaoTranslate(q, to){
+  const crypto = require('crypto');
+  const ts = String(Date.now());
+  const salt = ts + Math.floor(Math.random()*10);
+  const sign = crypto.createHash('md5').update('fanyideskweb' + q + salt + 'Ygy_4c=r#e#4EX^NUGUc5').digest('hex');
+  const body = new URLSearchParams({
+    i: q, from: 'auto', to: to==='en' ? 'en' : 'zh-CHS', smartresult: 'dict',
+    client: 'fanyideskweb', salt, sign, lts: ts,
+    bv: crypto.createHash('md5').update(UA).digest('hex'),
+    doctype: 'json', version: '2.1', keyfrom: 'fanyi.web', action: 'FY_BY_REALTlME'
+  });
+  const r = await fetch('https://fanyi.youdao.com/translate_o?smartresult=dict&smartresult=rule', {
+    method: 'POST',
+    headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'Referer': 'https://fanyi.youdao.com/', 'Origin': 'https://fanyi.youdao.com' },
+    body,
+    signal: AbortSignal.timeout(6000)
+  });
+  if(!r.ok) throw new Error('youdao-tr HTTP ' + r.status);
+  const d = await r.json();
+  if(!d || d.errorCode !== 0 || !d.translateResult) throw new Error('youdao-tr empty');
+  const text = d.translateResult.map(seg=>seg.map(s=>s.tgt).join('')).join('\n');
+  if(!text.trim()) throw new Error('youdao-tr empty');
+  return { source: 'youdao', text };
+}
+
+async function qqTranslate(q, to){
+  const r = await fetch('https://fanyi.qq.com/api/translate', {
+    method: 'POST',
+    headers: { 'User-Agent': UA, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source: 'auto', target: to==='en' ? 'en' : 'zh', sourceText: q, qtv: '', qtk: '', sessionUuid: 'translate_uuid' + Date.now() }),
+    signal: AbortSignal.timeout(6000)
+  });
+  if(!r.ok) throw new Error('qq-tr HTTP ' + r.status);
+  const d = await r.json();
+  const text = d && d.translate && d.translate.records ? d.translate.records.map(x=>x.targetText||'').join('\n') : '';
+  if(!text.trim()) throw new Error('qq-tr empty');
+  return { source: 'qq', text };
+}
+
 const server = http.createServer(async (req, res)=>{
   try{
     const u = new URL(req.url, 'http://127.0.0.1');
@@ -103,6 +143,30 @@ const server = http.createServer(async (req, res)=>{
       if(!data){
         res.writeHead(502, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store', 'Access-Control-Allow-Origin':'*'});
         res.end(JSON.stringify({error:'在线词典暂时不可用（已尝试有道/必应），请使用内置离线词库'}));
+        return;
+      }
+      res.writeHead(200, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store', 'Access-Control-Allow-Origin':'*'});
+      res.end(JSON.stringify(data));
+      return;
+    }
+    if(p.startsWith('/api/translate')){
+      const q = (u.searchParams.get('q')||'').trim();
+      const to = (u.searchParams.get('to')||'zh-CN').trim();
+      if(!q){
+        res.writeHead(400, {'Content-Type':'application/json; charset=utf-8'});
+        res.end(JSON.stringify({error:'缺少参数 q'}));
+        return;
+      }
+      // 多源尝试在线翻译：有道 → QQ；都失败则返回离线提示由前端做逐词对照
+      let data = null;
+      try{ data = await youdaoTranslate(q, to); }catch(e){ console.log('youdao-tr fail:', e.message); }
+      if(!data){
+        try{ data = await qqTranslate(q, to); }catch(e){ console.log('qq-tr fail:', e.message); }
+      }
+      if(!data){
+        // 无在线翻译源可用：200 + offline 标记，由前端做离线对照（避免浏览器报 502 噪音）
+        res.writeHead(200, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store', 'Access-Control-Allow-Origin':'*'});
+        res.end(JSON.stringify({offline:true, error:'在线翻译接口不可用，将使用离线逐词对照'}));
         return;
       }
       res.writeHead(200, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store', 'Access-Control-Allow-Origin':'*'});

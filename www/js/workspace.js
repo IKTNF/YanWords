@@ -105,7 +105,7 @@ const WS = {
 
   applyZoom(){
     const doc = this.currentDoc();
-    if(doc && doc.mode==='image'){
+    if(doc && (doc.mode==='image' || doc.mode==='textview')){
       const w = Math.round(760 * (App.state.wsZoom||17) / 17);
       const fs = (App.state.wsZoom||17);
       this.docEl.querySelectorAll('.pdf-page').forEach(el=>{
@@ -170,7 +170,7 @@ const WS = {
           doc.status = null;
           this.renderDocList();
           this.activateDoc(doc.id);
-          App.toast('已以扫描模式打开（'+parsed.pageCount+' 页）：按住左键拖拽框选文字区域即可识别');
+          App.toast('已以查看模式打开（'+parsed.pageCount+' 页）：按住左键拖拽框选区域即可识别文字');
         }else{
           let text = parsed.text;
           if(!text.trim()){
@@ -180,15 +180,16 @@ const WS = {
           }
           if(text.length > 3000000){
             text = text.slice(0, 3000000);
-            App.toast('内容过长，已截断前 300 万字符；其余部分可用页码范围再解析');
+            App.toast('内容过长，已截断前 300 万字符');
           }
-          doc.text = text; doc.html = null; doc.status = null;
+          // 文本类文件：查看器模式（转画布保持排版），区域框选识别
+          doc.mode = 'textview';
+          doc.text = text;
           doc.wordCount = countWords(text);
+          doc.status = null;
           this.renderDocList();
           this.activateDoc(doc.id);
-          App.toast(doc.wordCount
-            ? '已加载：'+f.name+'（约 '+doc.wordCount+' 个可识别单词）'
-            : '已加载：'+f.name+'，但未发现英文单词','err');
+          App.toast('已以查看模式打开（约 '+doc.wordCount+' 词）：按住左键拖拽框选区域即可识别文字');
         }
       }catch(err){
         if(!(err && err.message && err.message.includes('已取消'))) console.error(err);
@@ -250,41 +251,8 @@ const WS = {
     }
     if(end > total) end = total;
     if(start > end) start = end;
-
-    const span = end - start + 1;
-    const pages = [];
-    let emptyRun = 0;
-    for(let i=start;i<=end;i++){
-      if(opts && opts.isCancelled && opts.isCancelled()) throw new Error('已取消');
-      const page = await pdf.getPage(i);
-      const tc = await page.getTextContent();
-      const hasText = tc.items.some(it => it.str && it.str.trim());
-      // 起始连续 5 页都无文字 → 判定为扫描版，进入图片模式
-      if(i - start < 5){
-        if(!hasText) emptyRun++;
-        if(i - start === 4 && emptyRun === 5){
-          return {mode:'image', pdf, pageCount: total, range:{start, end}};
-        }
-      }
-      const lines = []; let curY = null; let line = '';
-      const flush = ()=>{ if(line){ lines.push(line); line=''; } };
-      for(const it of tc.items){
-        if(!it.str) continue;
-        const y = it.transform ? it.transform[5] : 0;
-        if(curY===null || Math.abs(y-curY)>2){ flush(); curY=y; line=it.str; }
-        else if(it.hasEOL){ line += it.str; flush(); curY=null; }
-        else line += (line && !/[- ]$/.test(line) && !/^[- ]/.test(it.str) ? ' ' : '') + it.str;
-      }
-      flush();
-      pages.push(lines.join('\n'));
-      page.cleanup();
-      const done = i - start + 1;
-      if(opts && opts.onProgress) opts.onProgress('解析中 '+done+'/'+span, done/span);
-      if(span > 20 && (done % 10 === 0 || done === span)) App.toast('解析 PDF 中… '+done+'/'+span+' 页');
-    }
-    if(!pages.join('\n').trim()) return {mode:'image', pdf, pageCount: total, range:{start, end}};
-    if(end < total) pages.push('……（共 '+total+' 页，本段解析第 '+start+'-'+end+' 页）');
-    return {mode:'text', text: pages.join('\n\n')};
+    // 所有 PDF 一律按查看器模式打开（展示原本版面），区域框选识别
+    return {mode:'image', pdf, pageCount: total, range:{start, end}};
   },
 
   /* ================= 文档管理 ================= */
@@ -363,7 +331,7 @@ const WS = {
     const gapRow = document.getElementById('photoGapRow');
     if(gapRow) gapRow.style.display = (doc && doc.mode==='image' && doc.photoFiles && doc.photoFiles.length>1) ? '' : 'none';
     if(!doc){ this.docEl.innerHTML = WS_EMPTY; return; }
-    if(doc.mode==='image'){ this.renderImageDoc(doc); return; }
+    if(doc.mode==='image' || doc.mode==='textview'){ this.renderImageDoc(doc); return; }
     this.renderTextDoc(doc);
     this.applyZoom();
   },
@@ -436,8 +404,91 @@ const WS = {
     delete el.dataset.done;
   },
 
+  /* ================= 文本查看器模式：转画布保持排版，区域框选识别 ================= */
+  renderTextViewDoc(doc){
+    if(!doc.tvSegs) doc.tvSegs = this.buildTextSegments(doc.text);
+    const segs = doc.tvSegs;
+    if(this._imgObs){ this._imgObs.disconnect(); this._imgObs = null; }
+    doc.pages = [];
+    this.docEl.innerHTML = segs.map((s,i)=>
+      '<div class="pdf-page" data-page="'+(i+1)+'">'
+      + '<div class="page-canvas-wrap">'
+      + '<canvas class="page-img" style="aspect-ratio:'+s.w+'/'+s.h+'"></canvas>'
+      + '<div class="page-overlays"></div>'
+      + '</div>'
+      + '<div class="page-label">文本 '+(i+1)+'/'+segs.length+' · 长按拖拽框选区域识别文字</div>'
+      + '</div>').join('');
+    this.applyZoom();
+    // 文本段绘制极快：直接全部渲染，滚动零等待
+    this.docEl.querySelectorAll('.pdf-page').forEach(el=>this.renderTextSegment(doc, +el.dataset.page, el));
+  },
+
+  buildTextSegments(text){
+    const W = 1600, LH = 48, MARGIN = 40, TOP = 48;
+    const FONT = '34px Georgia, "Times New Roman", "Microsoft YaHei", serif';
+    const c = document.createElement('canvas');
+    const ctx = c.getContext('2d');
+    ctx.font = FONT;
+    const maxW = W - MARGIN*2;
+    const segs = [];
+    let lines = [];
+    let h = TOP;
+    const flush = ()=>{ if(lines.length){ segs.push({w:W, h:h+MARGIN, lines}); lines = []; h = TOP; } };
+    for(const rawPara of String(text).split('\n')){
+      const para = rawPara.replace(/\t/g, '    ');
+      if(!para){ h += LH; if(h > 8200) flush(); continue; }
+      let line = '';
+      const pushLine = ()=>{ lines.push(line); h += LH; if(h > 8200) flush(); };
+      for(const w of para.split(' ')){
+        // CJK 逐字换行；拉丁按词累积
+        let unit = '';
+        const flushUnit = ()=>{
+          if(!unit) return;
+          const test = line ? line+' '+unit : unit;
+          if(ctx.measureText(test).width > maxW && line){ pushLine(); line = unit; }
+          else line = test;
+          unit = '';
+        };
+        for(const ch of w){
+          if(/[\u4e00-\u9fff]/.test(ch)){
+            flushUnit();
+            const t2 = line + ch;
+            if(ctx.measureText(t2).width > maxW && line){ pushLine(); line = ch; }
+            else line = t2;
+          }else{
+            unit += ch;
+          }
+        }
+        flushUnit();
+      }
+      if(line){ pushLine(); line = ''; }
+    }
+    flush();
+    return segs.length ? segs : [{w:W, h:TOP+MARGIN, lines:[]}];
+  },
+
+  renderTextSegment(doc, segIdx, el){
+    const seg = doc.tvSegs[segIdx-1];
+    if(!seg) return;
+    const st = this.pageState(doc, segIdx);
+    if(st.rendered) return;
+    const canvas = el.querySelector('.page-img');
+    canvas.width = seg.w; canvas.height = seg.h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, seg.w, seg.h);
+    ctx.fillStyle = '#1a1f2b';
+    ctx.font = '34px Georgia, "Times New Roman", "Microsoft YaHei", serif';
+    ctx.textBaseline = 'top';
+    let y = 48;
+    for(const ln of seg.lines){ ctx.fillText(ln, 40, y); y += 48; }
+    canvas.style.aspectRatio = seg.w + ' / ' + seg.h;
+    st.rendered = true;
+    canvas.classList.add('loaded');
+  },
+
   /* ================= 扫描模式：图片显示 + 区域OCR ================= */
   renderImageDoc(doc){
+    if(doc.mode==='textview'){ this.renderTextViewDoc(doc); return; }
     const start = doc.range ? doc.range.start : 1;
     const end = doc.range ? doc.range.end : doc.pageCount;
     const isPhoto = !!doc.photoFiles;
@@ -486,13 +537,18 @@ const WS = {
 
   pumpRenderQueue(){
     if(this._activeRenders >= 3 || !this._renderQueue.length) return;
-    const job = this._renderQueue.shift();
-    if(!job.el.isConnected || this.currentDoc()!==job.doc){ this.pumpRenderQueue(); return; }
+    // 优先渲染离视口最近的页（拖进度条直达的页立即开工）
     const rootRect = this.docEl.getBoundingClientRect();
-    const r = job.el.getBoundingClientRect();
-    const dist = (r.bottom < rootRect.top) ? rootRect.top - r.bottom
-               : (r.top > rootRect.bottom) ? r.top - rootRect.bottom : 0;
-    if(dist > 2500){ this.pumpRenderQueue(); return; }
+    let bestIdx = -1, bestDist = Infinity;
+    this._renderQueue.forEach((job, i)=>{
+      if(!job.el.isConnected || this.currentDoc()!==job.doc) return;
+      const r = job.el.getBoundingClientRect();
+      const dist = (r.bottom < rootRect.top) ? rootRect.top - r.bottom
+                 : (r.top > rootRect.bottom) ? r.top - rootRect.bottom : 0;
+      if(dist < bestDist){ bestDist = dist; bestIdx = i; }
+    });
+    if(bestIdx < 0 || bestDist > 2500){ this._renderQueue = []; return; }
+    const job = this._renderQueue.splice(bestIdx, 1)[0];
     this._activeRenders++;
     this.renderPageImage(job.doc, job.pageNum, job.el).finally(()=>{
       this._activeRenders--;
@@ -507,6 +563,7 @@ const WS = {
   },
 
   async renderPageImage(doc, pageNum, el){
+    if(doc.mode==='textview'){ return this.renderTextSegment(doc, pageNum, el); }
     if(doc.stitchSegs) return this.renderStitchSegment(doc, pageNum, el);
     if(doc.photoFiles) return this.renderPhoto(doc, pageNum, el);
     if(!doc.pdf) return;
@@ -515,7 +572,7 @@ const WS = {
     st.rendering = true;
     try{
       const page = await doc.pdf.getPage(pageNum);
-      const viewport = page.getViewport({scale: 3});
+      const viewport = page.getViewport({scale: 2});
       const canvas = el.querySelector('.page-img');
       canvas.width = viewport.width; canvas.height = viewport.height;
       canvas.style.aspectRatio = viewport.width + ' / ' + viewport.height;
@@ -642,7 +699,20 @@ const WS = {
       ctx.fillRect(0, 0, W, seg.h);
       let y = 0;
       seg.items.forEach((it, i)=>{
-        if(i > 0) y += gapC;
+        if(i > 0){
+          y += gapC;
+          // 可见的灰条分隔带 + 虚线，让间距调节一目了然
+          ctx.fillStyle = '#eef0f4';
+          ctx.fillRect(0, y-gapC, W, gapC);
+          ctx.strokeStyle = '#c9cfdc';
+          ctx.setLineDash([14, 12]);
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(60, y-gapC/2);
+          ctx.lineTo(W-60, y-gapC/2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
         const h = Math.round(W * it.h / it.w);
         ctx.drawImage(it.bmp, 0, y, W, h);
         y += h;
@@ -707,27 +777,27 @@ const WS = {
     const doc = this.currentDoc();
     if(!doc) return;
     if(this.docEl.classList.contains('selectable')) return; // 文本选择模式
-    // 1) 单词手势（文本模式或扫描模式识别覆盖层中的单词）
+    // 1) 识别覆盖层中的单词手势
     const span = e.target.closest('.ws-word');
     if(span){
-      e.preventDefault();
-      const pageEl = e.target.closest('.pdf-page');
       const overlayEl = e.target.closest('.pdf-overlay');
-      const blockEl = e.target.closest('.ws-block');
-      const g = { kind:'word', doc, anchor:+span.dataset.i, cur:+span.dataset.i, mode:'pending',
-                  startX:e.clientX, startY:e.clientY, prev:[0,0], spanEl:span, pageEl:pageEl||null,
-                  overlayEl:overlayEl||null, blockEl:blockEl||null,
-                  spans: overlayEl ? overlayEl.spans : (blockEl ? [...blockEl.querySelectorAll('.ws-word')] : null) };
-      this.gesture = g;
-      g.timer = setTimeout(()=>{
-        if(this.gesture!==g) return;
-        g.mode = 'selecting';
-        this.applySel(g, g.anchor, g.anchor);
-      }, 380);
-      return;
+      if(overlayEl){
+        e.preventDefault();
+        const pageEl = e.target.closest('.pdf-page');
+        const g = { kind:'word', doc, anchor:+span.dataset.i, cur:+span.dataset.i, mode:'pending',
+                    startX:e.clientX, startY:e.clientY, prev:[0,0], spanEl:span, pageEl:pageEl||null,
+                    overlayEl:overlayEl, blockEl:null, spans: overlayEl.spans };
+        this.gesture = g;
+        g.timer = setTimeout(()=>{
+          if(this.gesture!==g) return;
+          g.mode = 'selecting';
+          this.applySel(g, g.anchor, g.anchor);
+        }, 380);
+        return;
+      }
     }
-    // 2) 扫描模式：区域框选手势
-    if(doc.mode==='image'){
+    // 2) 查看器/扫描/拼接/文本页：区域框选手势
+    if(doc.mode==='image' || doc.mode==='textview'){
       const pageEl = e.target.closest('.pdf-page');
       if(pageEl && !e.target.closest('.pdf-overlay')){
         e.preventDefault();
@@ -901,9 +971,9 @@ const WS = {
       let w = Math.max(1, Math.ceil(rectCss.w * sx)), h = Math.max(1, Math.ceil(rectCss.h * sy));
       x = Math.max(0, Math.min(x, cw-1)); y = Math.max(0, Math.min(y, ch-1));
       w = Math.min(w, cw-x); h = Math.min(h, ch-y);
-      const UP = 2;
+      const UP = Math.min(3, Math.sqrt((1600*1200) / Math.max(1, w*h)));   // 超大区域自适应缩放，控制 OCR 耗时
       const t = document.createElement('canvas');
-      t.width = w*UP; t.height = h*UP;
+      t.width = Math.max(1, Math.round(w*UP)); t.height = Math.max(1, Math.round(h*UP));
       const tctx = t.getContext('2d');
       tctx.imageSmoothingEnabled = true; tctx.imageSmoothingQuality = 'high';
       tctx.fillStyle = '#fff'; tctx.fillRect(0,0,t.width,t.height);
@@ -1008,7 +1078,7 @@ const WS = {
       }else{
         if(ctx.entry) meaning = ctx.entry.defs.join('\n');
         if(ctx.onlineSenses && ctx.onlineSenses.length){
-          meaning = meaning ? meaning+'\n【在线】'+ctx.onlineSenses.join('\n') : ctx.onlineSenses.join('\n');
+          meaning = meaning ? meaning+'\n【翻译】'+ctx.onlineSenses.join('\n') : ctx.onlineSenses.join('\n');
         }
       }
       if(!meaning) meaning = '（无释义，可在记忆区自行编辑补充）';
@@ -1058,7 +1128,7 @@ const WS = {
                   onlineSenses:null, onlinePhon:'' };
     this.renderDef(this.popupWordHTML(word, entry, marked, fam, !!doc), ctx);
     this.bindFamActions();
-    if(App.state.source==='youdao') this.fillOnline(ctx, word);
+    if(App.state.source==='youdao') this.fillTranslate(ctx, word);
   },
 
   /* 词群成员点击 → 直接切换查看该词 */
@@ -1069,7 +1139,7 @@ const WS = {
                   onlineSenses:null, onlinePhon:'' };
     this.renderDef(this.popupWordHTML(w, entry, false, fam, false), ctx);
     this.bindFamActions();
-    if(App.state.source==='youdao') this.fillOnline(ctx, w);
+    if(App.state.source==='youdao') this.fillTranslate(ctx, w);
   },
 
   bindFamActions(){
@@ -1094,22 +1164,21 @@ const WS = {
     const words = phrase.split(/\s+/).filter(Boolean);
     const ctx = { text:phrase, isPhrase:true, words, onlineSenses:null, onlinePhon:'' };
     this.renderDef(this.popupPhraseHTML(phrase, words), ctx);
-    if(App.state.source==='youdao') this.fillOnline(ctx, phrase);
+    if(App.state.source==='youdao') this.fillTranslate(ctx, phrase);
   },
 
-  fillOnline(ctx, q){
+  fillTranslate(ctx, q){
     const sec = this.defEl.querySelector('#onlineSec');
     const title = this.defEl.querySelector('#onlineTitle');
     if(!sec) return;
     if(title) title.style.display = 'block';
-    sec.innerHTML = '<span class="spin"></span>查询在线词典…';
-    App.fetchOnline(q).then(res=>{
+    sec.innerHTML = '<span class="spin"></span>翻译中…';
+    App.translate(q, /[\u4e00-\u9fff]/.test(q) ? 'en' : 'zh-CN').then(res=>{
       if(this.popupCtx!==ctx) return;
-      ctx.onlineSenses = res.senses; ctx.onlinePhon = res.phonetic;
-      if(title) title.textContent = '在线释义 · '+(res.source==='bing' ? '必应' : '有道');
-      if(res.error){ sec.innerHTML = '<div class="note-line">在线查询失败：'+App.esc(res.error)+'</div>'; return; }
-      if(res.senses.length){ sec.innerHTML = res.senses.map(s=>'<div class="def-line">'+App.esc(s)+'</div>').join(''); }
-      else sec.innerHTML = '<div class="note-line">在线词典无结果</div>';
+      if(title) title.textContent = res.mode==='online' ? '在线翻译' : '对照翻译（离线）';
+      ctx.onlineSenses = res.text ? [res.text] : [];
+      if(res.error && !res.text){ sec.innerHTML = '<div class="note-line">翻译失败：'+App.esc(res.error)+'</div>'; return; }
+      sec.innerHTML = '<div class="def-line">'+App.esc(res.text)+'</div>';
     });
   },
 
@@ -1141,7 +1210,7 @@ const WS = {
               + '</div>';
           }).join('') + '</div>';
     }
-    body += '<div class="popup-section-title" id="onlineTitle"'+(App.state.source!=='youdao'?' style="display:none"':'')+'>在线释义 · 有道</div><div id="onlineSec"></div>';
+    body += '<div class="popup-section-title" id="onlineTitle"'+(App.state.source!=='youdao'?' style="display:none"':'')+'>在线翻译</div><div id="onlineSec"></div>';
     return `<button class="popup-close" data-act="close" title="关闭">✕</button>
     <div class="popup-head"><span class="popup-word">${App.esc(word)}</span>${chips.join('')}</div>
     <div class="popup-body">${body}</div>
@@ -1162,7 +1231,7 @@ const WS = {
     <div class="popup-body">
       <div class="popup-section-title" style="border-top:0;margin-top:0;padding-top:0">逐词释义</div>
       ${breakdown}
-      <div class="popup-section-title" id="onlineTitle"${App.state.source!=='youdao'?' style="display:none"':''}>在线释义 · 有道</div>
+      <div class="popup-section-title" id="onlineTitle"${App.state.source!=='youdao'?' style="display:none"':''}>在线翻译</div>
       <div id="onlineSec"></div>
     </div>
     <div class="popup-foot">

@@ -193,6 +193,45 @@ const App = {
     }
   },
 
+  /* ---------- 翻译（在线多源 + 离线对照兜底） ---------- */
+  async translate(q, to){
+    q = String(q||'').trim();
+    if(!q) return { text:'', mode:'', error:'输入为空' };
+    const wantEn = to==='en';
+    try{
+      const r = await fetch('/api/translate?q='+encodeURIComponent(q)+'&to='+encodeURIComponent(to||'zh-CN'), {signal: AbortSignal.timeout(15000)});
+      const d = await r.json();
+      if(!r.ok || d.error || d.offline) throw new Error(d && d.error || ('HTTP '+r.status));
+      return { text: d.text, mode:'online', source: d.source||'', error:'' };
+    }catch(e){
+      const t = this.offlineTranslate(q, wantEn);
+      return { text: t.text, mode:'offline', source:'', error:'', lines: t.lines||[] };
+    }
+  },
+
+  offlineTranslate(q, wantEn){
+    if(!/[\u4e00-\u9fff]/.test(q)){
+      // 英→中：逐词对照（保持原句结构，永远有结果）
+      const words = String(q).split(/(\s+)/).filter(s=>s.trim());
+      const gloss = words.map(w=>{
+        const clean = w.replace(/^[^A-Za-z]+|[^A-Za-z]+$/g,'');
+        if(!clean) return w;
+        const en = this.dictLookup(clean);
+        return en ? w.replace(clean, clean+'('+(en.defs[0]||'').split('；')[0].split('，')[0]+')') : w;
+      }).join(' ');
+      return { text: gloss, lines: [] };
+    }
+    // 中→英：按标点分句，逐句做词库反查（离线仅能查词对应）
+    const segs = String(q).split(/([，。；！？、,.!?;：:，\n])/).filter(s=>s.trim());
+    const lines = [];
+    for(const seg of segs){
+      if(/^[，。；！？、,.!?;：:，\n]+$/.test(seg)) continue;
+      const found = this.dictSearchZh(seg);
+      lines.push(seg + ' → ' + (found.length ? found.slice(0,4).map(f=>f.w).join(' / ') : '（离线词库未找到对应词）'));
+    }
+    return { text: lines.join('\n'), lines };
+  },
+
   /* ---------- 词性判断与词形变化 ---------- */
   posOfText(text){
     const t = String(text||'').toLowerCase();

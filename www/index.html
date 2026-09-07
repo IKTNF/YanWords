@@ -19,13 +19,13 @@
   <nav class="tabs">
     <button class="tab active" data-tab="workspace">工作区</button>
     <button class="tab" data-tab="memory">记忆区<span class="badge" id="memCount">0</span></button>
-    <button class="tab" data-tab="dict">词典</button>
+    <button class="tab" data-tab="dict">翻译</button>
   </nav>
   <div class="top-right">
     <span class="src-label">词库来源</span>
-    <select id="srcSelect" title="选择词典数据来源">
+    <select id="srcSelect" title="选择词典数据来源（翻译区查词与工作区在线翻译使用）">
       <option value="offline">内置考研词库（离线）</option>
-      <option value="youdao">有道词典（在线）</option>
+      <option value="youdao">在线翻译/词典（在线）</option>
     </select>
   </div>
 </header>
@@ -37,7 +37,7 @@
       <div class="side-card">
         <button class="btn btn-primary btn-block" id="btnUpload">📂 上传资料</button>
         <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt,.md,.jpg,.jpeg,.png,.webp,.bmp,.gif" multiple hidden>
-        <div class="upload-hint">支持 PDF / Word / TXT / 图片（jpg、png、webp 等），可多选；也可把文件直接拖进右侧阅读区。超过 300 页的 PDF 解析前可自选页码范围；图片与扫描版 PDF 一样：长按拖拽框选区域识别文字</div>
+        <div class="upload-hint">所有文件（PDF / Word / TXT / 图片）均按「查看器」方式打开、保持原本排版，长按拖拽框选区域即可识别文字。超过 300 页的 PDF 可自选页码范围；多张照片自动拼接成长图（间距可调）</div>
       </div>
       <div class="side-card">
         <div class="side-title">已上传文档</div>
@@ -61,11 +61,11 @@
       <div class="side-card">
         <div class="side-title">操作提示</div>
         <ul class="tips">
-          <li><b>单击</b>英文单词：弹出考研释义并<b>标黄</b></li>
-          <li><b>按住左键约 0.4 秒后拖拽</b>：框选多个单词识别<b>词组</b></li>
-          <li>右侧面板中点<b>收录</b>：把单词/词组存入记忆区</li>
-          <li>标黄可用面板中的按钮取消</li>
-          <li><b>扫描版 PDF</b>：自动以图片打开，长按拖拽框选区域即识别文字</li>
+          <li>文件按<b>原本排版</b>展示（文本/PDF/图片一致）</li>
+          <li><b>按住左键约 0.4 秒后拖拽</b>：框选区域即识别文字</li>
+          <li>识别框内：单击单词查考研释义并标黄，长按拖选词组</li>
+          <li>右侧面板点<b>收录</b>：把单词/词组存入记忆区</li>
+          <li>多张照片自动拼接，侧栏可调「图片间距」（灰条）</li>
         </ul>
       </div>
     </aside>
@@ -114,14 +114,14 @@
     </div>
   </section>
 
-  <!-- ==================== 词典 ==================== -->
+  <!-- ==================== 翻译区 ==================== -->
   <section class="panel" id="panel-dict">
     <div class="dict-wrap">
       <div class="dict-search card">
-        <input type="text" id="dictInput" placeholder="输入英文单词（如 economy）或中文（如 经济）…">
-        <button class="btn btn-primary" id="btnSearch">🔍 查询</button>
+        <input type="text" id="dictInput" placeholder="单词查词（economy）/ 长段英文或中文自动翻译…">
+        <button class="btn btn-primary" id="btnSearch">🔍 查询 / 翻译</button>
       </div>
-      <div class="dict-hint muted">支持 英→中 / 中→英 · 内置词库含考研大纲 5530 词（含词频）+ 红宝书补充词 · 在线词典为有道</div>
+      <div class="dict-hint muted">支持 单词查词（考研释义 + 词群 + 词形变化）/ 长段中英互译（在线翻译，离线自动切换逐词对照）</div>
       <div id="dictResults" class="dict-results"></div>
     </div>
   </section>

@@ -29,21 +29,23 @@ const DICT = {
 
   search(q){
     q = (q!==undefined ? String(q) : String(document.getElementById('dictInput').value||'')).trim();
-    if(!q){ App.toast('请输入要查询的单词'); return; }
+    if(!q){ App.toast('请输入要查询或翻译的内容'); return; }
     document.getElementById('dictInput').value = q;
     const zh = /[\u4e00-\u9fff]/.test(q);
+    const singleEn = !zh && /^[A-Za-z][A-Za-z'’\-]*$/.test(q);
     this.resultsEl.innerHTML = '';
 
-    // 静态结果一次性拼接写入；在线卡片最后插入，避免 innerHTML 重建销毁异步节点
+    // 静态结果一次性拼接写入；翻译卡片最后插入，避免 innerHTML 重建销毁异步节点
     let staticHtml = '';
-    if(!zh){
+    if(singleEn){
+      // 单个英文单词：查词（释义/词形/词群）+ 翻译
       const entry = App.dictLookup(q);
-      const disp = String(q).trim();           // 展示/收录查询词本身（如 amazing），原形作为辅助信息
+      const disp = String(q).trim();
       let fam = [];
       if(entry){
         const clean = disp.toLowerCase().replace(/[^a-z]/g,'');
         if(clean && clean !== entry.w.toLowerCase()){
-          fam = [entry, ...App.dictFamily(entry.w, 9)];   // 派生形式：原形排词群首位
+          fam = [entry, ...App.dictFamily(entry.w, 9)];
         }else{
           fam = App.dictFamily(entry.w, 10);
         }
@@ -52,26 +54,33 @@ const DICT = {
       }
       const forms = entry ? App.wordForms(entry.w, App.posOfEntry(entry)) : null;
       if(entry) staticHtml += this.entryCard(entry, false, fam, disp, forms);
-      if(!entry && App.state.source==='offline'){
-        staticHtml += '<div class="dict-card"><div class="note-line">离线词库中未找到「'+App.esc(disp)+'」，可切换顶栏词库来源为「有道词典（在线）」查询。</div></div>';
-      }
+      else staticHtml += '<div class="dict-card"><div class="note-line">离线词库未收录「'+App.esc(disp)+'」，下方给出在线/对照翻译。</div></div>';
       const related = App.dictPrefix(disp, entry ? entry.w.toLowerCase() : null, 10);
       if(related.length){
         staticHtml += '<div class="dict-card"><div class="popup-section-title">相近单词</div>'
           + related.map(r=>this.entryCard(r, true)).join('') + '</div>';
       }
       this.resultsEl.innerHTML = staticHtml;
-      if(App.state.source==='youdao') this.onlineCard(disp);
-    }else{
+      this.translateCard(disp, 'zh-CN');
+    }else if(!zh){
+      // 长段英文：整段翻译
+      this.resultsEl.innerHTML = '';
+      this.translateCard(q, 'zh-CN');
+    }else if(q.length <= 6){
+      // 短中文：离线反查 + 中→英翻译
       const found = App.dictSearchZh(q);
       if(found.length){
         staticHtml += '<div class="dict-card"><div class="popup-section-title">离线词库（考研）匹配 '+found.length+' 条</div>'
           + found.map(r=>this.entryCard(r)).join('') + '</div>';
-      }else if(App.state.source==='offline'){
-        staticHtml = '<div class="dict-card"><div class="note-line">离线词库释义中未找到「'+App.esc(q)+'」，可切换为「有道词典（在线）」查询。</div></div>';
+      }else{
+        staticHtml += '<div class="dict-card"><div class="note-line">离线词库未找到「'+App.esc(q)+'」对应的单词。</div></div>';
       }
       this.resultsEl.innerHTML = staticHtml;
-      if(App.state.source==='youdao') this.onlineCard(q);
+      this.translateCard(q, 'en');
+    }else{
+      // 长段中文：整段翻译
+      this.resultsEl.innerHTML = '';
+      this.translateCard(q, 'en');
     }
 
     if(!this.resultsEl.innerHTML.trim()) this.resultsEl.innerHTML = '<div class="empty small">无结果</div>';
@@ -110,24 +119,20 @@ const DICT = {
     </div>`;
   },
 
-  onlineCard(q){
+  translateCard(q, to){
     const host = document.createElement('div');
     const box = document.createElement('div');
     box.className = 'dict-card';
-    box.innerHTML = '<div class="online-tag">在线 · 有道词典</div><span class="spin"></span><span class="muted">查询中…</span>';
+    box.innerHTML = '<div class="online-tag">翻译 · '+(to==='en'?'中→英':'英→中')+'</div><span class="spin"></span><span class="muted">翻译中…</span>';
     host.appendChild(box);
     this.resultsEl.insertBefore(host, this.resultsEl.firstChild);
-    App.fetchOnline(q).then(res=>{
-      const srcName = res.source==='bing' ? '必应词典' : '有道词典';
-      let html = '<div class="online-tag">在线 · '+srcName+'</div>';
-      if(res.error){
-        html += '<div class="note-line">在线查询失败：'+App.esc(res.error)+'（离线词库不受影响）</div>';
-      }else if(res.senses.length){
-        html += res.phonetic ? '<div class="popup-phon">'+App.esc(res.phonetic)+'</div>' : '';
-        html += '<div class="defs">'+res.senses.map(s=>App.esc(s)).join('\n')+'</div>';
-        html += '<button class="btn btn-primary collect-btn" data-collect="'+App.esc(q)+'">📥 收录到记忆区</button>';
+    App.translate(q, to).then(res=>{
+      let html = '<div class="online-tag">'+(res.mode==='online' ? '在线翻译' : '对照翻译（离线）')+'</div>';
+      if(res.text){
+        html += '<div class="defs">'+App.esc(res.text)+'</div>';
+        html += '<button class="btn btn-primary collect-btn" data-collect="'+App.esc(q.slice(0,80))+'">📥 收录原文+译文</button>';
       }else{
-        html += '<div class="note-line">在线词典无结果</div>';
+        html += '<div class="note-line">翻译失败：'+App.esc(res.error||'未知错误')+'</div>';
       }
       box.innerHTML = html;
     });
