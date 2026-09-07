@@ -63,6 +63,20 @@ const App = {
   esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); },
   $: (id)=>document.getElementById(id),
 
+  /* ---------- 重型组件按需加载（降低启动内存与首屏耗时） ---------- */
+  loadScript(src){
+    if(this._libs && this._libs[src]) return this._libs[src];
+    if(!this._libs) this._libs = {};
+    this._libs[src] = new Promise((res, rej)=>{
+      const s = document.createElement('script');
+      s.src = src; s.async = true;
+      s.onload = ()=>res();
+      s.onerror = ()=>{ delete this._libs[src]; rej(new Error('组件加载失败：'+src)); };
+      document.head.appendChild(s);
+    });
+    return this._libs[src];
+  },
+
   /* ---------- 离线词典查询 ---------- */
   makeEntry(key, fromWord){
     const r = this.index.get(key);
@@ -416,5 +430,22 @@ function adjForms(base){
   if(vowels>=3 || base.length>=9 || /(ful|less|ous|ive|ing|ed|able|ible|al|ic|ent|ant)$/.test(base)) return {c:'more '+base, s:'most '+base};
   return {c:base+'er', s:base+'est'};
 }
+
+/* ---------- 组件按需加载入口（供各面板在真正用到时调用） ---------- */
+function ensurePdfjs(){
+  if(window.pdfjsLib) return Promise.resolve();
+  return App.loadScript('libs/pdf.min.js').then(()=>{
+    if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'libs/pdf.worker.min.js';
+  });
+}
+function ensureMammoth(){ return window.mammoth ? Promise.resolve() : App.loadScript('libs/mammoth.browser.min.js'); }
+function ensureDocx(){ return window.docx ? Promise.resolve() : App.loadScript('libs/docx.umd.js'); }
+function ensurePdfLib(){
+  return Promise.all([
+    window.PDFLib ? Promise.resolve() : App.loadScript('libs/pdf-lib.min.js'),
+    window.fontkit ? Promise.resolve() : App.loadScript('libs/fontkit.umd.min.js')
+  ]);
+}
+function ensureTesseract(){ return window.Tesseract ? Promise.resolve() : App.loadScript('libs/tess/tesseract.min.js'); }
 
 document.addEventListener('DOMContentLoaded', ()=>App.boot());

@@ -145,3 +145,5 @@ server.listen(PORT, '127.0.0.1', ()=>{
   console.log('  关闭本窗口（Ctrl+C）即退出程序。');
   console.log('');
 });
+
+module.exports = server;   // 桌面版主进程据此等待启动完成并统一关闭

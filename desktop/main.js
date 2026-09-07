@@ -36,10 +36,13 @@ async function loadMupdf(){
   return mupdf;
 }
 
-ipcMain.handle('mupdf:open', async (e, buf)=>{
+/* 按文件路径直接打开（桌面版专用）：大 PDF 不再整文件读入内存/IPC 拷贝 */
+ipcMain.handle('mupdf:openPath', async (e, filePath)=>{
   try{
     const M = await loadMupdf();
-    const doc = M.Document.openDocument(Buffer.from(buf), 'application/pdf');
+    if(typeof filePath !== 'string' || !filePath) return { error: '文件路径无效' };
+    if(!fs.existsSync(filePath)) return { error: '文件不存在或已被移动' };
+    const doc = M.Document.openDocument(filePath, 'application/pdf');
     if(!doc || doc.countPages() < 1) return { error: '打开失败' };
     const id = nextId++;
     docCache.set(id, doc);
@@ -112,4 +115,10 @@ if(!gotLock){
 app.on('window-all-closed', ()=>{
   if(server){ try{ server.close(); }catch(_){} }
   app.quit();
+});
+
+/* 退出前统一释放 MuPDF 文档，避免残留 */
+app.on('before-quit', ()=>{
+  for(const d of docCache.values()){ try{ d.destroy(); }catch(_){} }
+  docCache.clear();
 });

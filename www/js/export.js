@@ -13,6 +13,8 @@ function saveBlob(blob, name){
 async function exportWordDoc(){
   const items = MEM.items;
   if(!items.length){ App.toast('记忆区为空，无可导出内容','err'); return; }
+  try{ await ensureDocx(); }
+  catch(e){ App.toast('Word 导出组件加载失败：'+(e&&e.message||e),'err'); return; }
   if(!window.docx){ App.toast('Word 导出组件加载失败，请通过启动脚本访问本程序','err'); return; }
   App.toast('正在导出 Word…');
   try{
@@ -80,6 +82,8 @@ function wrapLines(text, font, size, maxW){
 async function exportPdfDoc(){
   const items = MEM.items;
   if(!items.length){ App.toast('记忆区为空，无可导出内容','err'); return; }
+  try{ await ensurePdfLib(); }
+  catch(e){ App.toast('PDF 导出组件加载失败：'+(e&&e.message||e),'err'); return; }
   if(!window.PDFLib){ App.toast('PDF 导出组件加载失败，请通过启动脚本访问本程序','err'); return; }
   App.toast('正在生成 PDF…（首次需加载中文字体，请稍候）');
   try{

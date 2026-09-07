@@ -131,6 +131,7 @@ const MEM = {
   },
 
   async importDocx(file){
+    await ensureMammoth();
     if(!window.mammoth) throw new Error('Word 解析组件未加载');
     const arrayBuffer = await file.arrayBuffer();
     const res = await mammoth.extractRawText({arrayBuffer});
@@ -138,6 +139,7 @@ const MEM = {
   },
 
   async importPdf(file){
+    await ensurePdfjs();
     if(!window.pdfjsLib) throw new Error('PDF 解析组件未加载');
     const buf = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;
