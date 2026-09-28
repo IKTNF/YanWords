@@ -1190,6 +1190,10 @@ const WS = {
       }
     }
     const entry = App.dictLookup(spanEl.textContent);
+    // 音标注解：悬停即可看到该词音标（离线词库命中时有值）
+    const phon = (entry && entry.p) || phonOf(spanEl.textContent, entry) || '';
+    spanEl.title = phon ? (spanEl.textContent + '  音标 /' + phon.replace(/^\/|\/$/g,'') + '/') : spanEl.textContent;
+    if(App.state.autoSpeak) SPEAK.say(spanEl.textContent);
     this.showWordPopup(spanEl.textContent, entry, e, doc, spanEl.dataset.gi!=null ? +spanEl.dataset.gi : null, spanEl, !!pageEl);
   },
 
@@ -1256,7 +1260,8 @@ const WS = {
     ov.style.width = Math.max(rectCss.w, 140)+'px';
     ov.style.minHeight = Math.max(rectCss.h, 24)+'px';
     ov.innerHTML = '<div class="pdf-overlay-bar"><span class="pdf-overlay-tag">已识别</span>'
-      + '<button class="ov-act" data-ov="collect" title="把这段文字和释义收录到记忆区">📥 收录全部</button>'
+      + '<button class="ov-act" data-ov="speak" title="朗读这段识别出的文字">🔊 朗读</button>'
+      + '<button class="ov-act" data-ov="collect" title="把这段文字和释义收录到记忆区（分区见右侧面板底部）">📥 收录全部</button>'
       + '<button class="ov-act" data-ov="close" title="移除该识别框">✕</button></div>'
       + '<div class="pdf-overlay-text">'+this.buildHTML(text)+'</div>';
     pageEl.querySelector('.page-overlays').appendChild(ov);
@@ -1269,13 +1274,15 @@ const WS = {
           st.overlays = st.overlays.filter(x=>x!==ov);
           return;
         }
+        if(b.dataset.ov==='speak'){ SPEAK.say(text); return; }
         if(b.dataset.ov==='collect'){
           const lines = text.split(/\s+/).filter(Boolean).slice(0, 80).map(w=>{
             const en = App.dictLookup(w);
             return w + (en ? ' — '+(en.defs[0]||'') : '');
           }).join('\n');
-          MEM.add(text.slice(0, 2000), lines || '');
-          App.toast('已收录所选区域文字到记忆区');
+          const zid = this.collectZoneId();
+          MEM.add(text.slice(0, 2000), lines || '', zid);
+          App.toast('已收录所选区域文字到分区「'+MEM.zoneName(zid)+'」');
         }
       });
     });
@@ -1309,17 +1316,34 @@ const WS = {
     this.defEl.querySelectorAll('[data-act]').forEach(b=>{
       b.addEventListener('click', ()=>this.popupAction(b.dataset.act));
     });
+    const zsel = this.defEl.querySelector('#wsZoneSel');
+    if(zsel){
+      zsel.value = MEM.zone(App.state.collectZone) ? App.state.collectZone : MEM.activeZoneId;
+      zsel.addEventListener('change', ()=>{
+        App.state.collectZone = zsel.value;
+        App.save();
+        App.toast('工作区收录目标分区：「'+MEM.zoneName(zsel.value)+'」');
+      });
+    }
+  },
+
+  /* 当前从工作区收录的目标分区（未选择时用记忆区当前分区） */
+  collectZoneId(){
+    const zsel = this.defEl.querySelector('#wsZoneSel');
+    const id = (zsel && zsel.value) || App.state.collectZone || '';
+    return id && MEM.zone(id) ? id : '';
   },
 
   resetDef(){
     this.popupCtx = null;
-    this.defEl.innerHTML = '<div class="ws-def-empty"><div class="empty small">💡 单击单词查看考研释义<br><span class="empty-sub">扫描模式：长按拖拽框选区域识别文字</span></div></div>';
+    this.defEl.innerHTML = '<div class="ws-def-empty"><div class="empty small">💡 单击单词查看考研释义 + 音标，🔊 可朗读<br><span class="empty-sub">扫描模式：长按拖拽框选区域识别文字</span></div></div>';
   },
 
   popupAction(act){
     const ctx = this.popupCtx;
     if(!ctx) return;
     if(act==='close'){ this.resetDef(); return; }
+    if(act==='speak'){ SPEAK.say(ctx.text); return; }
     if(act==='collect'){
       let meaning = '';
       if(ctx.isPhrase){
@@ -1338,8 +1362,9 @@ const WS = {
         }
       }
       if(!meaning) meaning = '（无释义，可在记忆区自行编辑补充）';
-      MEM.add(ctx.text, meaning);
-      App.toast('已收录「'+ctx.text+'」到记忆区');
+      const zid = this.collectZoneId();
+      MEM.add(ctx.text, meaning, zid);
+      App.toast('已收录「'+ctx.text+'」到分区「'+MEM.zoneName(zid)+'」');
       return;
     }
     if(act==='toggleMark'){
@@ -1395,6 +1420,7 @@ const WS = {
                   onlineSenses:null, onlinePhon:'' };
     this.renderDef(this.popupWordHTML(w, entry, false, fam, false), ctx);
     this.bindFamActions();
+    if(App.state.autoSpeak) SPEAK.say(w);
     if(App.state.source==='youdao') this.fillOnline(ctx, w);
   },
 
@@ -1402,16 +1428,21 @@ const WS = {
     this.defEl.querySelectorAll('[data-fam]').forEach(row=>{
       row.addEventListener('click', e=>{
         if(e.target.closest('[data-fam-add]')) return;
+        if(e.target.closest('[data-spk]')) return;
         this.showWordLookup(row.dataset.fam);
       });
+    });
+    this.defEl.querySelectorAll('[data-spk]').forEach(b=>{
+      b.addEventListener('click', e=>{ e.stopPropagation(); SPEAK.say(b.dataset.spk); });
     });
     this.defEl.querySelectorAll('[data-fam-add]').forEach(b=>{
       b.addEventListener('click', e=>{
         e.stopPropagation();
         const w = b.dataset.famAdd;
         const en = App.dictLookup(w);
-        MEM.add(w, en ? en.defs.join('\n') : '');
-        App.toast('已收录「'+w+'」到记忆区');
+        const zid = this.collectZoneId();
+        MEM.add(w, en ? en.defs.join('\n') : '', zid);
+        App.toast('已收录「'+w+'」到分区「'+MEM.zoneName(zid)+'」');
       });
     });
   },
@@ -1420,6 +1451,8 @@ const WS = {
     const words = phrase.split(/\s+/).filter(Boolean);
     const ctx = { text:phrase, isPhrase:true, words, onlineSenses:null, onlinePhon:'' };
     this.renderDef(this.popupPhraseHTML(phrase, words), ctx);
+    this.bindFamActions();
+    if(App.state.autoSpeak) SPEAK.say(phrase);
     if(App.state.source==='youdao') this.fillOnline(ctx, phrase);
   },
 
@@ -1440,9 +1473,9 @@ const WS = {
   },
 
   popupWordHTML(word, entry, marked, fam, showMark){
+    const phon = (entry && entry.p) || phonOf(word, entry) || '';
     const chips = [];
     if(entry){
-      if(entry.p) chips.push('<span class="popup-phon">'+App.esc(entry.p)+'</span>');
       if(entry.freq!=null) chips.push('<span class="chip">考研大纲词</span>');
       if(entry.cat) chips.push('<span class="chip gray">'+App.esc(entry.cat)+'</span>');
     }
@@ -1463,15 +1496,20 @@ const WS = {
               + '<span class="fam-word">'+App.esc(f.w)+'</span>'
               + (f.p?'<span class="popup-phon">'+App.esc(f.p)+'</span>':'')
               + '<span class="fam-def">'+App.esc(f.defs[0]||'')+'</span>'
+              + spkBtn(f.w, 'mini')
               + '<button class="fam-add" data-fam-add="'+App.esc(f.w)+'" title="收录到记忆区">📥</button>'
               + '</div>';
           }).join('') + '</div>';
     }
     body += '<div class="popup-section-title" id="onlineTitle"'+(App.state.source!=='youdao'?' style="display:none"':'')+'>在线释义</div><div id="onlineSec"></div>';
     return `<button class="popup-close" data-act="close" title="关闭">✕</button>
-    <div class="popup-head"><span class="popup-word">${App.esc(word)}</span>${chips.join('')}</div>
+    <div class="popup-head"><span class="popup-word">${App.esc(word)}</span>${spkBtn(word)}${phon?'<span class="popup-phon">音标 /'+App.esc(phon.replace(/^\/|\/$/g,''))+'/</span>':''}${chips.join('')}</div>
     <div class="popup-body">${body}</div>
     <div class="popup-foot">
+      <div class="collect-zone">
+        <span class="muted">收录到分区</span>
+        <select id="wsZoneSel" class="zone-select" title="选择要收录到的记忆分区">${MEM.zoneOptionsHtml(App.state.collectZone)}</select>
+      </div>
       <button class="btn btn-primary" data-act="collect">📥 收录到记忆区</button>
       ${showMark ? '<button class="btn btn-ghost" data-act="toggleMark">'+(marked?'取消标黄':'标黄')+'</button>' : ''}
       <button class="btn btn-ghost" data-act="dict">词典中打开</button>
@@ -1481,17 +1519,22 @@ const WS = {
   popupPhraseHTML(phrase, words){
     const breakdown = words.map(w=>{
       const en = App.dictLookup(w);
-      return '<div class="def-line"><b>'+App.esc(w)+'</b> — '+App.esc(en?(en.defs[0]||''):'未收录')+'</div>';
+      return '<div class="def-line"><b>'+App.esc(w)+'</b> — '+App.esc(en?(en.defs[0]||''):'未收录')
+        + (en && en.p ? ' <span class="popup-phon">'+App.esc(en.p)+'</span>' : '') + spkBtn(w, 'mini') + '</div>';
     }).join('');
     return `<button class="popup-close" data-act="close" title="关闭">✕</button>
-    <div class="popup-head"><span class="popup-word">${App.esc(phrase)}</span><span class="chip">词组 · ${words.length} 词</span></div>
+    <div class="popup-head"><span class="popup-word">${App.esc(phrase)}</span>${spkBtn(phrase)}<span class="chip">词组 · ${words.length} 词</span></div>
     <div class="popup-body">
-      <div class="popup-section-title" style="border-top:0;margin-top:0;padding-top:0">逐词释义</div>
+      <div class="popup-section-title" style="border-top:0;margin-top:0;padding-top:0">逐词释义（🔊 可朗读）</div>
       ${breakdown}
       <div class="popup-section-title" id="onlineTitle"${App.state.source!=='youdao'?' style="display:none"':''}>在线释义</div>
       <div id="onlineSec"></div>
     </div>
     <div class="popup-foot">
+      <div class="collect-zone">
+        <span class="muted">收录到分区</span>
+        <select id="wsZoneSel" class="zone-select" title="选择要收录到的记忆分区">${MEM.zoneOptionsHtml(App.state.collectZone)}</select>
+      </div>
       <button class="btn btn-primary" data-act="collect">📥 收录词组</button>
       <button class="btn btn-ghost" data-act="dict">词典中查询</button>
     </div>`;

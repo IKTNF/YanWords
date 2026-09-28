@@ -22,6 +22,9 @@
     <button class="tab" data-tab="dict">词典</button>
   </nav>
   <div class="top-right">
+    <label class="auto-speak" id="autoSpeakLabel" title="开启后：工作区点词、词典查询、记忆区点行都会自动朗读">
+      <input type="checkbox" id="autoSpeak"> 🔊 自动朗读
+    </label>
     <span class="src-label">词库来源</span>
     <select id="srcSelect" title="选择词典数据来源">
       <option value="offline">内置考研词库（离线）</option>
@@ -63,8 +66,10 @@
         <ul class="tips">
           <li>文件按<b>原本排版</b>展示（文本/PDF/图片一致）</li>
           <li><b>按住左键约 0.4 秒后拖拽</b>：框选区域即识别文字</li>
-          <li>识别框内：单击单词查考研释义并标黄，长按拖选词组</li>
-          <li>右侧面板点<b>收录</b>：把单词/词组存入记忆区</li>
+          <li>识别框内：单击单词查考研释义<b>与音标</b>并标黄，长按拖选词组</li>
+          <li>右侧面板底部可<b>选择收录分区</b>；点 📥 收录到该分区</li>
+          <li><b>🔊 朗读</b>：面板/记忆区/词典均有喇叭按钮，顶栏可开「自动朗读」</li>
+          <li>识别框可 <b>🔊 朗读整段</b>，或「收录全部」整段录入</li>
           <li>多张照片自动拼接，侧栏可调「图片间距」（灰条）</li>
         </ul>
       </div>
@@ -92,21 +97,29 @@
 
   <!-- ==================== 记忆区 ==================== -->
   <section class="panel" id="panel-memory">
+    <div class="mem-zonebar card">
+      <span class="zone-label">🗂 记忆分区</span>
+      <select id="memZoneSel" class="zone-select" title="切换记忆分区（每个分区独立存放收录的单词）"></select>
+      <button class="btn btn-ghost" id="btnZoneAdd" title="新建一个记忆分区（例如：真题生词 / 阅读高频）">＋ 新建分区</button>
+      <button class="btn btn-ghost" id="btnZoneRename" title="重命名当前分区">✎ 重命名</button>
+      <button class="btn btn-ghost btn-danger-ghost" id="btnZoneDel" title="删除当前分区及其中的记录">🗑 删除分区</button>
+      <span class="muted" id="memZoneInfo"></span>
+    </div>
     <div class="mem-toolbar card">
       <div class="mem-title">📚 记忆区 <span class="muted" id="memCount2">共 0 条</span></div>
       <div class="toolbar-right">
-        <input type="text" id="memSearch" placeholder="搜索已收录的单词 / 释义…">
+        <input type="text" id="memSearch" placeholder="搜索当前分区的单词 / 释义…">
         <div class="slider-row">
           <span>缩放</span>
           <input type="range" id="memZoom" min="12" max="32" value="16">
           <span id="memZoomVal" class="mono">16px</span>
         </div>
-        <button class="btn" id="btnExportWord" title="按当前顺序导出全部记录">⬇ 导出 Word</button>
-        <button class="btn" id="btnExportPdf" title="按当前顺序导出全部记录">⬇ 导出 PDF</button>
-        <button class="btn" id="btnImport" title="从 Word/PDF 导入记忆区（与导出的格式一致，追加到末尾）">📥 导入</button>
+        <button class="btn" id="btnExportWord" title="按当前顺序导出当前分区记录">⬇ 导出 Word</button>
+        <button class="btn" id="btnExportPdf" title="按当前顺序导出当前分区记录">⬇ 导出 PDF</button>
+        <button class="btn" id="btnImport" title="从 Word/PDF 导入（追加到当前分区末尾）">📥 导入</button>
         <input type="file" id="fileImport" accept=".docx,.pdf" multiple hidden>
-        <button class="btn" id="btnOrg" title="把同一词族的单词整理到一起">🔀 整理</button>
-        <button class="btn btn-danger-ghost" id="btnClearMem">清空</button>
+        <button class="btn" id="btnOrg" title="把同一词族的单词整理到一起（当前分区内）">🔀 整理</button>
+        <button class="btn btn-danger-ghost" id="btnClearMem">清空当前分区</button>
       </div>
     </div>
     <div class="mem-list-wrap">

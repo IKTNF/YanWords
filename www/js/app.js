@@ -1,7 +1,8 @@
 'use strict';
 /* ============ 全局应用状态与公共能力 ============ */
 const App = {
-  state: { source:'offline', wsZoom:17, memZoom:16, wsLeftW:252, wsRightW:342, wsLeftHidden:false, wsRightHidden:false },
+  state: { source:'offline', wsZoom:17, memZoom:16, wsLeftW:252, wsRightW:342, wsLeftHidden:false, wsRightHidden:false,
+           collectZone:'', autoSpeak:false },
   index: new Map(),
   famIndex: new Map(),
 
@@ -26,6 +27,18 @@ const App = {
       this.save();
       this.toast('词库来源已切换：'+sel.options[sel.selectedIndex].text);
     });
+    // 语音朗读（工作区 / 记忆区 / 词典 共用）
+    SPEAK.init();
+    const auto = document.getElementById('autoSpeak');
+    if(auto){
+      auto.checked = !!this.state.autoSpeak;
+      auto.addEventListener('change', ()=>{
+        this.state.autoSpeak = auto.checked;
+        this.save();
+        this.toast(auto.checked ? '已开启「点词自动朗读」' : '已关闭「点词自动朗读」');
+        if(auto.checked) SPEAK.say('hello');
+      });
+    }
     // 缩放初值
     document.getElementById('wsZoom').value = this.state.wsZoom;
     document.getElementById('wsZoomVal').textContent = this.state.wsZoom+'px';
@@ -47,8 +60,9 @@ const App = {
 
   updateMemBadge(){
     const n = (MEM.items||[]).length;
+    const zones = (MEM.zones||[]).length || 1;
     const b = document.getElementById('memCount');   if(b) b.textContent = n;
-    const b2 = document.getElementById('memCount2'); if(b2) b2.textContent = '共 '+n+' 条';
+    const b2 = document.getElementById('memCount2'); if(b2) b2.textContent = '共 '+n+' 条'+(zones>1 ? ' · '+zones+' 个分区' : '');
   },
 
   toast(msg, type){
@@ -276,6 +290,71 @@ const App = {
     return null;
   }
 };
+
+/* ============ 语音朗读（工作区 / 记忆区 / 词典 共用） ============ */
+const SPEAK = {
+  ok: typeof window !== 'undefined' && 'speechSynthesis' in window,
+  voice: null,
+  ready: false,
+
+  init(){
+    if(!this.ok) return;
+    const pick = ()=>{
+      try{
+        const vs = speechSynthesis.getVoices() || [];
+        this.voice = vs.find(v=>/en[-_]US/i.test(v.lang)) || vs.find(v=>/^en/i.test(v.lang)) || null;
+        this.ready = vs.length > 0;
+      }catch(e){ this.voice = null; }
+    };
+    pick();
+    try{ speechSynthesis.onvoiceschanged = pick; }catch(e){}
+  },
+
+  /* 音标 / 中文 也能念：只对拉丁字母走英文发音 */
+  say(text, opts){
+    const t = String(text==null?'':text).replace(/\s+/g,' ').trim();
+    if(!t) return;
+    if(!this.ok){ App.toast('当前系统不支持语音朗读','err'); return; }
+    try{
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(t.slice(0, 600));
+      if(!this.voice) this.init();
+      if(this.voice){ u.voice = this.voice; u.lang = this.voice.lang || 'en-US'; }
+      else u.lang = 'en-US';
+      const latin = /^[A-Za-z0-9'’\-.\s]+$/.test(t);
+      u.rate = (opts && opts.rate) || (latin ? (t.split(/\s+/).length > 3 ? 0.95 : 0.82) : 1);
+      u.pitch = 1;
+      u.onerror = ()=>{ /* 系统无可用语音时静默 */ };
+      speechSynthesis.speak(u);
+    }catch(e){
+      App.toast('朗读失败：'+(e&&e.message||e),'err');
+    }
+  },
+
+  stop(){ if(this.ok){ try{ speechSynthesis.cancel(); }catch(e){} } }
+};
+
+/* 取单词音标：离线词库优先，其次记忆区已存音标 */
+function phonOf(word, entry){
+  if(entry && entry.p) return entry.p;
+  const w = String(word==null?'':word).trim();
+  if(!w) return '';
+  let e = entry;
+  if(!e && typeof App !== 'undefined' && App.dictLookup){ try{ e = App.dictLookup(w); }catch(err){ e = null; } }
+  if(e && e.p) return e.p;
+  // 记忆区里已存的音标（含从导出文件导入的音标）
+  if(typeof MEM !== 'undefined' && MEM.items){
+    const hit = MEM.items.find(it=>String(it.w).toLowerCase()===w.toLowerCase());
+    if(hit && hit.p) return hit.p;
+  }
+  return '';
+}
+
+/* 朗读按钮（三大区统一外观；data-spk 属性交给各面板的事件委托处理） */
+function spkBtn(word, cls){
+  const w = String(word==null?'':word);
+  return '<button class="spk'+(cls?' '+cls:'')+'" data-spk="'+App.esc(w)+'" title="朗读 '+(App.esc(w)||'')+'">🔊</button>';
+}
 
 function morphCandidates(w){
   const out = [];

@@ -6,13 +6,15 @@ const DICT = {
     document.getElementById('dictInput').addEventListener('keydown', e=>{ if(e.key==='Enter') this.search(); });
     this.resultsEl = document.getElementById('dictResults');
     this.resultsEl.addEventListener('click', e=>{
+      const spk = e.target.closest('[data-spk]');
+      if(spk){ e.stopPropagation(); SPEAK.say(spk.dataset.spk); return; }
       const famAdd = e.target.closest('[data-fam-add]');
       if(famAdd){
         e.stopPropagation();
         const w = famAdd.dataset.famAdd;
         const en = App.dictLookup(w);
         MEM.add(w, en ? en.defs.join('\n') : '');
-        App.toast('已收录「'+w+'」到记忆区');
+        App.toast('已收录「'+w+'」到分区「'+MEM.zoneName()+'」');
         return;
       }
       const famRow = e.target.closest('[data-fam]');
@@ -34,6 +36,7 @@ const DICT = {
     const zh = /[\u4e00-\u9fff]/.test(q);
     const singleEn = !zh && /^[A-Za-z][A-Za-z'’\-]*$/.test(q);
     this.resultsEl.innerHTML = '';
+    if(singleEn && App.state.autoSpeak) SPEAK.say(q);
 
     // 静态结果一次性拼接写入；在线卡片最后插入，避免 innerHTML 重建销毁异步节点
     let staticHtml = '';
@@ -94,7 +97,7 @@ const DICT = {
       ? '<div class="forms-line">'+App.esc(forms.label)+'：'+forms.items.map(([k,v])=>k+' '+App.esc(v)).join(' · ')+'</div>'
       : '';
     const famHtml = (!mini && fam && fam.length)
-      ? '<div class="popup-section-title">词群释义（'+fam.length+'，点击查询 / 📥 收录）</div><div class="fam-list">'
+      ? '<div class="popup-section-title">词群释义（'+fam.length+'，点击查询 / 🔊 朗读 / 📥 收录）</div><div class="fam-list">'
         + fam.map(f=>{
             const isBase = entry && f.w.toLowerCase()===entry.w.toLowerCase();
             return '<div class="fam-row" data-fam="'+App.esc(f.w)+'" title="点击查询该词">'
@@ -102,16 +105,17 @@ const DICT = {
               + '<span class="fam-word">'+App.esc(f.w)+'</span>'
               + (f.p?'<span class="popup-phon">'+App.esc(f.p)+'</span>':'')
               + '<span class="fam-def">'+App.esc(f.defs[0]||'')+'</span>'
+              + spkBtn(f.w, 'mini')
               + '<button class="fam-add" data-fam-add="'+App.esc(f.w)+'" title="收录到记忆区">📥</button>'
               + '</div>';
           }).join('') + '</div>'
       : '';
     return `<div class="dict-card${mini?' mini':''}">
-      <div class="dict-card-head"><span class="popup-word">${App.esc(title)}</span>${entry && title.toLowerCase()!==entry.w.toLowerCase()?'<span class="chip gray">原形 '+App.esc(entry.w)+'</span>':''}${entry.p?'<span class="popup-phon">'+App.esc(entry.p)+'</span>':''}${chips.join('')}</div>
+      <div class="dict-card-head"><span class="popup-word">${App.esc(title)}</span>${spkBtn(title)}${entry && title.toLowerCase()!==entry.w.toLowerCase()?'<span class="chip gray">原形 '+App.esc(entry.w)+'</span>':''}${entry.p?'<span class="popup-phon">音标 /'+App.esc(String(entry.p).replace(/^\/|\/$/g,''))+'/</span>':''}${chips.join('')}</div>
       <div class="defs">${entry.defs.map(d=>App.esc(d)).join('\n')}</div>
       ${formsHtml}
       ${famHtml}
-      ${mini?'':'<button class="btn btn-primary collect-btn" data-collect="'+App.esc(title)+'">📥 收录到记忆区</button>'}
+      ${mini?'':'<button class="btn btn-primary collect-btn" data-collect="'+App.esc(title)+'" title="收录到记忆区当前分区：'+App.esc(MEM.zoneName())+'">📥 收录到记忆区</button>'}
     </div>`;
   },
 
@@ -128,7 +132,7 @@ const DICT = {
       if(res.error){
         html += '<div class="note-line">在线查询失败：'+App.esc(res.error)+'（离线词库不受影响）</div>';
       }else if(res.senses.length){
-        html += res.phonetic ? '<div class="popup-phon">'+App.esc(res.phonetic)+'</div>' : '';
+        html += '<div class="dict-card-head"><span class="popup-word">'+App.esc(q)+'</span>'+spkBtn(q)+(res.phonetic?'<span class="popup-phon">音标 /'+App.esc(String(res.phonetic).replace(/^\/|\/$/g,''))+'/</span>':'')+'</div>';
         html += '<div class="defs">'+res.senses.map(s=>App.esc(s)).join('\n')+'</div>';
         html += '<button class="btn btn-primary collect-btn" data-collect="'+App.esc(q)+'">📥 收录到记忆区</button>';
       }else{
@@ -145,6 +149,6 @@ const DICT = {
     const defsEl = card.querySelector('.defs');
     const d = defsEl ? defsEl.textContent : '';
     MEM.add(w, d||'');
-    App.toast('已收录「'+w+'」到记忆区');
+    App.toast('已收录「'+w+'」到分区「'+MEM.zoneName()+'」（可在记忆区切换/新建分区）');
   }
 };
