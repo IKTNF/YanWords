@@ -168,9 +168,13 @@ const WS = {
       if(IMG.includes(ext)) continue;
       if(!['pdf','docx','doc','txt','md'].includes(ext)){ App.toast('不支持的文件类型：'+f.name,'err'); continue; }
       const mb = f.size/1048576;
-      if(f.size > 1024*1024*1024){ App.toast('文件过大（>1GB）：'+f.name+'，请先用 PDF 工具拆分后上传','err'); continue; }
-      if((ext==='docx'||ext==='doc') && f.size > 300*1024*1024){ App.toast('Word 文档过大（>300MB）：'+f.name+'，请先拆分为多个文档后上传','err'); continue; }
-      if(mb > 300) App.toast('文件较大（'+mb.toFixed(0)+'MB），解析可能需要较长时间，请耐心等待…');
+      // 单文件上限 2GB（PDF 由 MuPDF 按路径解析、文本流式读取，均不整文件进内存）
+      if(f.size > 2048*1024*1024){ App.toast('文件过大（>2GB）：'+f.name+'，请先用 PDF 工具拆分后上传','err'); continue; }
+      // Word 解析需要整份文档进内存，单独设更保守的上限
+      if((ext==='docx'||ext==='doc') && f.size > 1024*1024*1024){ App.toast('Word 文档过大（>1GB）：'+f.name+'，建议拆分为多个文档，或先转成 PDF / TXT 后再上传','err'); continue; }
+      // PDF 走原生引擎秒开，无需等待提示；文本/Word 大文件给出等待提示
+      if(mb > 300 && ext!=='pdf') App.toast('文件较大（'+mb.toFixed(0)+'MB），解析可能需要较长时间，请耐心等待…');
+      if(mb > 300 && ext==='pdf') App.toast('大体积 PDF（'+mb.toFixed(0)+'MB）将按需解析，打开后可拖进度条快速浏览');
       const doc = this.createDoc(f.name, f.size, f.lastModified, '');
       doc.status = { phase:'解析中', progress:0, cancel:false };
       this.renderDocList();
@@ -286,7 +290,8 @@ const WS = {
     }
     let pdf = null;
     if(!mupdfInfo || !mupdfInfo.ok){
-      if(file.size > 300*1024*1024) throw new Error('PDF 体积过大且原生引擎未能打开，请检查文件是否损坏');
+      // 回退 pdf.js 需要整份文件进渲染进程内存，超大文件直接给出明确提示（避免崩溃）
+      if(file.size > 512*1024*1024) throw new Error('该 PDF 体积过大（>512MB）且原生引擎未能打开，请检查文件是否损坏');
       await ensurePdfjs();
       if(!window.pdfjsLib) throw new Error('PDF 解析组件未加载');
       const buf = await file.arrayBuffer();
