@@ -22,6 +22,14 @@
     <button class="tab" data-tab="dict">词典</button>
   </nav>
   <div class="top-right">
+    <label class="eye-care" title="护眼模式：降低蓝光、柔和背景与对比，PDF / 图片页面同样生效">
+      🌿 护眼
+      <select id="eyeCareSel" title="选择护眼配色">
+        <option value="off">关闭</option>
+        <option value="warm">暖色</option>
+        <option value="green">豆沙绿</option>
+      </select>
+    </label>
     <label class="auto-speak" id="autoSpeakLabel" title="开启后：工作区点词、词典查询、记忆区点行都会自动朗读">
       <input type="checkbox" id="autoSpeak"> 🔊 自动朗读
     </label>
@@ -69,6 +77,7 @@
           <li>识别框内：单击单词查考研释义<b>与音标</b>并标黄，长按拖选词组</li>
           <li>右侧面板底部可<b>选择收录分区</b>；点 📥 收录到该分区</li>
           <li><b>🔊 朗读</b>：面板/记忆区/词典均有喇叭按钮，顶栏可开「自动朗读」</li>
+          <li><b>🌿 护眼</b>：顶栏可切「暖色 / 豆沙绿」，全局降低蓝光（PDF、图片页同样生效）</li>
           <li>识别框可 <b>🔊 朗读整段</b>，或「收录全部」整段录入</li>
           <li>多张照片自动拼接，侧栏可调「图片间距」（灰条）</li>
         </ul>
@@ -140,6 +149,8 @@
   </section>
 </main>
 
+<!-- 护眼模式覆盖层：降低蓝光，连 PDF / 图片画布一起生效（不拦截任何操作） -->
+<div id="eyeCareVeil" aria-hidden="true"></div>
 <div id="toasts" class="toasts"></div>
 
 <script src="js/wordlist.js"></script>

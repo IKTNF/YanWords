@@ -2,7 +2,7 @@
 /* ============ 全局应用状态与公共能力 ============ */
 const App = {
   state: { source:'offline', wsZoom:17, memZoom:16, wsLeftW:252, wsRightW:342, wsLeftHidden:false, wsRightHidden:false,
-           collectZone:'', autoSpeak:false },
+           collectZone:'', autoSpeak:false, eyeCare:'off' },
   index: new Map(),
   famIndex: new Map(),
 
@@ -39,6 +39,19 @@ const App = {
         if(auto.checked) SPEAK.say('hello');
       });
     }
+    // 护眼模式（暖色 / 豆沙绿）
+    const eyeSel = document.getElementById('eyeCareSel');
+    if(eyeSel){
+      eyeSel.value = this.state.eyeCare || 'off';
+      eyeSel.addEventListener('change', ()=>{
+        this.state.eyeCare = eyeSel.value;
+        this.applyEyeCare();
+        this.save();
+        App.toast(eyeSel.value === 'off' ? '已关闭护眼模式'
+                : '护眼模式：' + eyeSel.options[eyeSel.selectedIndex].text + '（全局降蓝光，PDF/图片同样生效）');
+      });
+    }
+    this.applyEyeCare();
     // 缩放初值
     document.getElementById('wsZoom').value = this.state.wsZoom;
     document.getElementById('wsZoomVal').textContent = this.state.wsZoom+'px';
@@ -51,6 +64,17 @@ const App = {
   },
 
   save(){ try{ localStorage.setItem('kyw_settings_v1', JSON.stringify(this.state)); }catch(e){} },
+
+  /* 护眼模式：切换配色主题 + 全局覆盖层（覆盖层 pointer-events:none，不影响任何操作） */
+  applyEyeCare(){
+    const mode = ['warm','green'].includes(this.state.eyeCare) ? this.state.eyeCare : 'off';
+    const b = document.body;
+    b.classList.toggle('eye-on', mode !== 'off');
+    b.classList.toggle('eye-warm', mode === 'warm');
+    b.classList.toggle('eye-green', mode === 'green');
+    const sel = document.getElementById('eyeCareSel');
+    if(sel && sel.value !== mode) sel.value = mode;
+  },
 
   switchTab(name){
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
