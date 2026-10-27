@@ -1,7 +1,7 @@
 {
   "name": "yancwords-desktop",
-  "version": "1.3.2",
-  "description": "研词助手 · 考研英语一词汇工作台（桌面版）",
+  "version": "1.3.3",
+  "description": "鐮旇瘝鍔╂墜 路 鑰冪爺鑻辫涓€璇嶆眹宸ヤ綔鍙帮紙妗岄潰鐗堬級",
   "main": "main.js",
   "license": "MIT",
   "scripts": {
@@ -11,7 +11,7 @@
   },
   "build": {
     "appId": "com.iktf.yancwords",
-    "productName": "研词助手",
+    "productName": "鐮旇瘝鍔╂墜",
     "directories": { "output": "dist" },
     "files": ["main.js", "preload.js", "approot/**/*"],
     "win": {
@@ -22,7 +22,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "研词助手",
+      "shortcutName": "鐮旇瘝鍔╂墜",
       "artifactName": "YanCi-KaoYan-Vocab-Workbench-${version}-setup.${ext}",
       "installerLanguages": ["zh_CN", "en_US"],
       "language": "2052",

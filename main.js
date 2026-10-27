@@ -40,39 +40,90 @@ async function loadMupdf(){
   return mupdf;
 }
 
-/* 按文件路径直接打开（桌面版专用）：大 PDF 不再整文件读入内存/IPC 拷贝 */
+/*
+ * 按需流式打开：mupdf.js 的 openDocument(路径) 内部是 readFileSync 整份读入再拷进
+ * WASM 堆（897MB 文件 ≈ 2.6GB 峰值），必须改为 JS 流回调（fd + pread）——MuPDF 只
+ * 请求它当前需要的字节，打开 7ms、渲染 60 页仅从磁盘读约 120MB。
+ */
+function openLazyDoc(M, filePath){
+  const fd = fs.openSync(filePath, 'r');
+  const size = fs.fstatSync(fd).size;
+  let closed = false;
+  const closeFd = ()=>{ if(closed) return; closed = true; try{ fs.closeSync(fd); }catch(_){} };
+  const handle = {
+    fileSize(){ return size; },
+    read(heap, addr, len, pos){
+      const avail = Math.max(0, Math.min(len, size - pos));
+      if(avail <= 0) return 0;
+      return fs.readSync(fd, heap, addr, avail, pos);   // 直接读入 WASM 堆，零额外拷贝
+    },
+    close: closeFd
+  };
+  try{
+    const stream = new M.Stream(handle);
+    const doc = M.Document.openDocument(stream, 'application/pdf');
+    return { doc, stream, handle };
+  }catch(err){
+    closeFd();          // 打开失败时不能把 fd 留在外面
+    throw err;
+  }
+}
+
+function closeDocEntry(entry){
+  if(!entry) return;
+  try{ entry.doc && entry.doc.destroy(); }catch(_){}
+  try{ entry.handle && entry.handle.close(); }catch(_){}
+  entry.doc = null; entry.stream = null;
+}
+
+/* 按文件路径流式打开；极小文件若流式失败再回退整份读取 */
 ipcMain.handle('mupdf:openPath', async (e, filePath)=>{
   try{
     const M = await loadMupdf();
     if(typeof filePath !== 'string' || !filePath) return { error: '文件路径无效' };
     if(!fs.existsSync(filePath)) return { error: '文件不存在或已被移动' };
-    const doc = M.Document.openDocument(filePath, 'application/pdf');
-    if(!doc || doc.countPages() < 1) return { error: '打开失败' };
+    let entry = null;
+    try{
+      entry = openLazyDoc(M, filePath);
+      if(!entry.doc || entry.doc.countPages() < 1) throw new Error('打开失败');
+    }catch(err){
+      closeDocEntry(entry);
+      if(fs.statSync(filePath).size > 256*1024*1024) throw err;   // 大文件不做回退，避免爆内存
+      const doc = M.Document.openDocument(filePath, 'application/pdf');
+      entry = { doc, stream: null, handle: null };
+    }
+    const pages = entry.doc.countPages();
     const id = nextId++;
-    docCache.set(id, doc);
-    return { ok: true, id, pages: doc.countPages() };
+    docCache.set(id, entry);
+    return { ok: true, id, pages };
   }catch(err){
     return { error: String(err && err.message || err) };
   }
 });
 
 ipcMain.handle('mupdf:render', async (e, id, pageNum, scale)=>{
+  const M = await loadMupdf();
+  const entry = docCache.get(id);
+  if(!entry || !entry.doc) return { error: '文档不存在' };
+  let page = null, pix = null;
   try{
-    const M = await loadMupdf();
-    const doc = docCache.get(id);
-    if(!doc) return { error: '文档不存在' };
-    const page = doc.loadPage(pageNum - 1);
-    const pix = page.toPixmap(M.Matrix.scale(scale, scale), M.ColorSpace.DeviceRGB, false, true);
+    page = entry.doc.loadPage(pageNum - 1);
+    pix = page.toPixmap(M.Matrix.scale(scale, scale), M.ColorSpace.DeviceRGB, false, true);
     const png = pix.asPNG();
     return { ok: true, w: pix.getWidth(), h: pix.getHeight(), png: Buffer.from(png) };
   }catch(err){
     return { error: String(err && err.message || err) };
+  }finally{
+    // 必须显式释放，否则 MuPDF 内部缓存会随翻页线性增长（30 页即可到 249MB）
+    try{ if(pix) pix.destroy(); }catch(_){}
+    try{ if(page) page.destroy(); }catch(_){}
+    try{ M.shrinkStore(); }catch(_){}
   }
 });
 
 ipcMain.handle('mupdf:close', (e, id)=>{
-  const d = docCache.get(id);
-  if(d){ try{ d.destroy(); }catch(_){} docCache.delete(id); }
+  const entry = docCache.get(id);
+  if(entry){ closeDocEntry(entry); docCache.delete(id); }
   return true;
 });
 
@@ -121,8 +172,9 @@ app.on('window-all-closed', ()=>{
   app.quit();
 });
 
-/* 退出前统一释放 MuPDF 文档，避免残留 */
+/* 退出前统一释放 MuPDF 文档（含文件句柄），避免残留 */
 app.on('before-quit', ()=>{
-  for(const d of docCache.values()){ try{ d.destroy(); }catch(_){} }
+  for(const entry of docCache.values()) closeDocEntry(entry);
   docCache.clear();
+  try{ if(mupdf && mupdf.emptyStore) mupdf.emptyStore(); }catch(_){}
 });

@@ -1,7 +1,8 @@
 node_modules/
 dist/
 approot/
+.cache/
 
-# 本地日志与临时文件
+# local build/test leftovers
 *.log
 *.tmp
